@@ -14,6 +14,7 @@ export interface TakeEntry { jobId: string; verdict: 'pending' | 'kept' | 'rejec
 export interface ShotRecord {
   id: string; sequence: string;
   status: 'draft' | 'rendering' | 'kept' | 'rejected';
+  action: string; // schema v2 (M3): the picture beat H3's [Shot N] block renders
   geoBlock: string; refs: ShotRef[]; camera: CameraBlock; audioBlock: AudioBlock;
   durationS: number; takes: TakeEntry[];
 }
@@ -25,7 +26,7 @@ const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend 
 const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
 
 function validate(input: {
-  status?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number;
+  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number;
 }): void {
   if (input.status !== undefined && !STATUSES.includes(input.status)) {
     throw errValidation(`invalid status "${input.status}"`, 'use draft|rendering|kept|rejected');
@@ -49,10 +50,26 @@ function validate(input: {
     throw errValidation(`duration_s must be 1–${MAX_TAKE_S}`,
       `longer than ${MAX_TAKE_S}s → split the shot or chain via repair/extend`);
   }
+  // Schema v2 (M3): the action is the picture beat — the present-tense law is
+  // agent-side; the store enforces shape only. Enforced on every write (create
+  // AND update-merge): a shot file can never be (re)written without one. Legacy
+  // pre-v2 files on disk are NOT migrated — render_shot refuses them (M3 Task 3).
+  if (!input.action?.trim()) {
+    throw errValidation('action is required',
+      'write the picture beat — one action, present tense, up to three sentences; dialogue lives in audio_block');
+  }
+  if (input.action.split('. ').length >= 4) {
+    throw errValidation('one beat, up to three sentences',
+      'split the beat into two shots — overloaded beats smear');
+  }
+  if (input.action.includes('"')) {
+    throw errValidation('dialogue lives only in audio_block',
+      'move spoken lines into audio_block.dialogue — action carries the picture');
+  }
 }
 
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
-  id: string; sequence: string; geoBlock: string; refs: ShotRef[];
+  id: string; sequence: string; action: string; geoBlock: string; refs: ShotRef[];
   camera: CameraBlock; audioBlock: AudioBlock; durationS: number;
 }): Promise<ShotRecord> {
   assertId(input.id, 'shot');
@@ -70,6 +87,7 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   }
   const record: ShotRecord = {
     id: input.id, sequence: input.sequence, status: 'draft',
+    action: input.action, // stored verbatim — the composer injects it byte-for-byte
     geoBlock: input.geoBlock, refs: input.refs, camera: input.camera,
     audioBlock: input.audioBlock ?? {}, durationS: input.durationS, takes: [],
   };

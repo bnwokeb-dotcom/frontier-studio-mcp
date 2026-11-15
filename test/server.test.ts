@@ -59,6 +59,20 @@ describe('MCP registry tools', () => {
     expect(JSON.stringify(res)).toMatch(/geo_block is required/);
   });
 
+  it('shot_create without action returns the schema-v2 refusal (the [Shot N] block needs the beat)', async () => {
+    await rpc('film_create', { film_id: 'film_x', title: 'X', logline: 'Y' });
+    await rpc('film_set_active', { film_id: 'film_x' });
+    await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
+    const res = await rpc('shot_create', {
+      id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      refs: [{ asset_id: 'loc_ice', role: 'location' }],
+      camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
+      duration_s: 10,
+    });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/action is required/);
+  });
+
   it('film_show with no active film surfaces the NOT_FOUND refusal with its NEXT action', async () => {
     const res = await rpc('film_show', {}); // fresh studio, nothing created or set active
     expect(isError(res)).toBe(true);
@@ -90,6 +104,7 @@ describe('MCP registry tools', () => {
     await rpc('sequence_lock_geo', { film_id: 'film_x', sequence: 'seq01', geo_block: geo });
     const created = await rpc('shot_create', {
       film_id: 'film_x', id: 'seq01-shot01', sequence: 'seq01', geo_block: geo,
+      action: 'Mara stops at the treeline, breath fogging. She looks back once.',
       refs: [{ asset_id: 'loc_ice', role: 'location' }],
       camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
       audio_block: { sfx: 'wind, distant ice crack', music: 'none' },
@@ -100,6 +115,7 @@ describe('MCP registry tools', () => {
     const shown = await rpc('shot_show', { film_id: 'film_x', shot_id: 'seq01-shot01' });
     expect(JSON.stringify(shown)).toContain('slow push-in');
     expect(JSON.stringify(shown)).toContain('wind, distant ice crack');
+    expect(JSON.stringify(shown)).toContain('She looks back once.');
   });
 
   it('shot_update maps snake_case patch keys and falls back to the active film', async () => {
@@ -107,6 +123,7 @@ describe('MCP registry tools', () => {
     await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
     await rpc('shot_create', {
       id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      action: 'Mara stops at the treeline, breath fogging. She looks back once.',
       refs: [{ asset_id: 'loc_ice', role: 'location' }],
       camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
       duration_s: 10,
@@ -127,6 +144,7 @@ describe('MCP registry tools', () => {
     await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
     await rpc('shot_create', {
       id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      action: 'Mara stops at the treeline, breath fogging. She looks back once.',
       refs: [{ asset_id: 'loc_ice', role: 'location' }],
       camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
       audio_block: { dialogue: [{ voice_ref: 'char_mara', line: 'hold the line' }], sfx: 'wind', music: 'none' },
@@ -136,10 +154,11 @@ describe('MCP registry tools', () => {
     const shown = recordOf(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
     // every output key is snake_case — a client can echo them straight back
     expect(Object.keys(shown).sort()).toEqual([
-      'audio_block', 'camera', 'duration_s', 'geo_block', 'id', 'refs', 'sequence', 'status', 'takes',
+      'action', 'audio_block', 'camera', 'duration_s', 'geo_block', 'id', 'refs', 'sequence', 'status', 'takes',
     ]);
     expect(shown.geo_block).toBe('ROOM: clearing.');
     expect(shown.refs).toEqual([{ asset_id: 'loc_ice', role: 'location' }]);
+    expect(shown.action).toBe('Mara stops at the treeline, breath fogging. She looks back once.');
     expect(shown.audio_block).toEqual({
       dialogue: [{ voice_ref: 'char_mara', line: 'hold the line' }], sfx: 'wind', music: 'none',
     });
@@ -150,6 +169,7 @@ describe('MCP registry tools', () => {
       patch: {
         sequence: shown.sequence,
         geo_block: shown.geo_block,
+        action: shown.action,
         refs: shown.refs,
         camera: shown.camera,
         audio_block: shown.audio_block,
@@ -159,6 +179,7 @@ describe('MCP registry tools', () => {
     expect(isError(updated)).toBe(false);
     const after = recordOf(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
     expect(after.duration_s).toBe(15); // the new value persisted (echo patch is not a silent no-op)
+    expect(after.action).toBe(shown.action); // echoed action survived intact
     expect(after.audio_block).toEqual(shown.audio_block); // echoed audio survived intact
   });
 
@@ -167,6 +188,7 @@ describe('MCP registry tools', () => {
     await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
     await rpc('shot_create', {
       id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      action: 'Mara stops at the treeline, breath fogging. She looks back once.',
       refs: [{ asset_id: 'loc_ice', role: 'location' }],
       camera: { lens: '35mm', move: 'push-in', reason: 'because' },
       duration_s: 10,
@@ -185,6 +207,7 @@ describe('MCP registry tools', () => {
     await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
     await rpc('shot_create', {
       id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      action: 'Mara stops at the treeline, breath fogging. She looks back once.',
       refs: [{ asset_id: 'loc_ice', role: 'location' }],
       camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
       audio_block: { dialogue: [{ line: 'hello' }], sfx: 'wind' },

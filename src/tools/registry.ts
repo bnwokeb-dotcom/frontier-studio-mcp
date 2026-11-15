@@ -70,7 +70,7 @@ const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
 // be silently skipped or smuggled past the store's checks.
 // audio_block merges ONTO the current record's audioBlock (the store merges
 // shallowly, so without this a partial audio patch would drop stored keys).
-const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'audio_block', 'duration_s']);
+const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'audio_block', 'duration_s', 'action']);
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number';
@@ -82,11 +82,15 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   for (const k of Object.keys(patch)) {
     if (!PATCH_KEYS.has(k)) {
       throw errValidation(`unknown patch key "${k}"`,
-        'allowed keys: geo_block, refs, camera, audio_block, duration_s, status');
+        'allowed keys: action, geo_block, refs, camera, audio_block, duration_s, status');
     }
   }
   if ('status' in patch) p.status = patch.status; // store enforces the status whitelist
   if ('sequence' in patch) p.sequence = patch.sequence; // store enforces the ID law + geo-lock re-check
+  if ('action' in patch) {
+    if (!isStr(patch.action)) throw errValidation('patch.action must be a string', 'action is the picture beat — one action, up to three sentences, no dialogue');
+    p.action = patch.action; // store enforces the schema-v2 shape (non-empty, ≤3 sentences, no quotes)
+  }
   if ('geo_block' in patch) {
     if (!isStr(patch.geo_block)) throw errValidation('patch.geo_block must be a string', 'paste the geo block text verbatim');
     p.geoBlock = patch.geo_block;
@@ -135,6 +139,7 @@ function toWireShot(r: ShotRecord) {
     id: r.id,
     sequence: r.sequence,
     status: r.status,
+    action: r.action, // absent on legacy pre-v2 records — JSON drops undefined
     geo_block: r.geoBlock,
     refs: (r.refs ?? []).map(toWireRef),
     camera: r.camera ?? { lens: '', move: '', reason: '' },
@@ -222,14 +227,16 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     return out(assetDir);
   }));
 
-  // Doctrine fields (geo_block/refs/camera/duration_s) stay optional at the zod
-  // layer on purpose: the discipline refusals ("geo_block is required", the NEXT
-  // lines, …) are StudioErrors from the store — a strict shape would replace them
-  // with generic zod "Input validation error" text before the handler ever runs.
+  // Doctrine fields (action/geo_block/refs/camera/duration_s) stay optional at
+  // the zod layer on purpose: the discipline refusals ("action is required",
+  // "geo_block is required", the NEXT lines, …) are StudioErrors from the
+  // store — a strict shape would replace them with generic zod "Input
+  // validation error" text before the handler ever runs.
   server.tool('shot_create', {
     film_id: z.string().optional(),
     id: z.string(),
     sequence: z.string(),
+    action: z.string().optional(),
     geo_block: z.string().optional(),
     refs: z.array(z.object({
       asset_id: z.string(),
@@ -251,6 +258,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     const record = await shotCreate(paths, filmId, {
       id: a.id,
       sequence: a.sequence,
+      action: a.action ?? '',
       geoBlock: a.geo_block ?? '',
       refs: (a.refs ?? []).map(toStoreRef),
       camera: { lens: a.camera?.lens ?? '', move: a.camera?.move ?? '', reason: a.camera?.reason ?? '' },
@@ -260,7 +268,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     return out(toWireShot(record));
   }));
 
-  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: status, sequence, geo_block, refs, camera, audio_block, duration_s (id is immutable; unknown keys are refused).', {
+  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: action, status, sequence, geo_block, refs, camera, audio_block, duration_s (id is immutable; unknown keys are refused).', {
     film_id: z.string().optional(),
     shot_id: z.string(),
     patch: z.record(z.unknown()),

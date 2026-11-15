@@ -8,6 +8,7 @@ import { initStudio } from '../../src/store/studio.js';
 import { filmCreate, patchFilmMeta } from '../../src/store/film.js';
 import { assetRegister } from '../../src/store/asset.js';
 import { shotCreate, shotShow, shotUpdate } from '../../src/store/shot.js';
+import { writeJsonAtomic } from '../../src/store/fs.js';
 
 let root: string; let paths: ReturnType<typeof studioPaths>;
 beforeEach(async () => {
@@ -23,8 +24,11 @@ beforeEach(async () => {
 });
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 
+const ACTION = 'Mara stops at the treeline, breath fogging. She looks back at the cabin once.';
+
 const goodShot = {
   id: 'seq01-shot01', sequence: 'seq01',
+  action: ACTION,
   geoBlock: '— CLEARING = center; — CABIN: frame-LEFT; camera north of treeline',
   refs: [ { assetId: 'char_mara', role: 'character' }, { assetId: 'loc_forest', role: 'location' } ],
   camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
@@ -105,5 +109,68 @@ describe('shot validation matrix', () => {
     const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { status: 'kept' });
     expect(s.status).toBe('kept');
     expect((await shotShow(paths, 'film_t', 'seq01-shot01')).status).toBe('kept');
+  });
+});
+
+describe('shot schema v2: action (the picture beat for H3 [Shot N])', () => {
+  it('stores the action verbatim and round-trips it', async () => {
+    const s = await shotCreate(paths, 'film_t', goodShot);
+    expect(s.action).toBe(ACTION);
+    expect((await shotShow(paths, 'film_t', 'seq01-shot01')).action).toBe(ACTION);
+  });
+
+  it('refuses a shot with no action — schema v2 requires the picture beat', async () => {
+    const { action, ...without } = goodShot;
+    await expect(shotCreate(paths, 'film_t', without as typeof goodShot))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/action is required/) });
+  });
+
+  it('refuses a whitespace-only action (non-empty means trim-non-empty)', async () => {
+    await expect(shotCreate(paths, 'film_t', { ...goodShot, action: '   ' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/action is required/) });
+  });
+
+  it('refuses a 4-sentence action — one beat, up to three sentences', async () => {
+    await expect(shotCreate(paths, 'film_t', { ...goodShot, action: 'One. Two. Three. Four.' }))
+      .rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: expect.stringMatching(/one beat, up to three sentences/),
+        nextAction: 'split the beat into two shots — overloaded beats smear',
+      });
+    // exactly three sentences is the lawful ceiling
+    const s = await shotCreate(paths, 'film_t', { ...goodShot, id: 'seq01-shot06', action: 'One. Two. Three.' });
+    expect(s.action).toBe('One. Two. Three.');
+  });
+
+  it('refuses dialogue quotes in action — dialogue lives only in audio_block', async () => {
+    await expect(shotCreate(paths, 'film_t', { ...goodShot, action: 'Mara says "hold the line" and waits.' }))
+      .rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: expect.stringMatching(/dialogue lives only in audio_block/),
+        nextAction: 'move spoken lines into audio_block.dialogue — action carries the picture',
+      });
+  });
+
+  it('update-merge enforcement: a legacy shot (no action) refuses a patch that leaves it action-less', async () => {
+    // A pre-v2 record exactly as an M1/M2-era file looks on disk — no migration.
+    const legacy = {
+      id: 'seq01-legacy', sequence: 'seq01', status: 'draft',
+      geoBlock: goodShot.geoBlock, refs: goodShot.refs, camera: goodShot.camera,
+      audioBlock: goodShot.audioBlock, durationS: 10, takes: [],
+    };
+    await writeJsonAtomic(paths.shotPath('film_t', 'seq01-legacy'), legacy);
+    await expect(shotUpdate(paths, 'film_t', 'seq01-legacy', { durationS: 12 }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/action is required/) });
+    // the fix path: supplying the action in the patch lands the merge
+    const fixed = await shotUpdate(paths, 'film_t', 'seq01-legacy', { action: ACTION });
+    expect(fixed.action).toBe(ACTION);
+    expect(fixed.durationS).toBe(10); // the refused patch never half-applied
+  });
+
+  it('a lawful update without action in the patch keeps the stored action (merge carries it)', async () => {
+    await shotCreate(paths, 'film_t', goodShot);
+    const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { durationS: 15 });
+    expect(s.durationS).toBe(15);
+    expect(s.action).toBe(ACTION);
   });
 });
