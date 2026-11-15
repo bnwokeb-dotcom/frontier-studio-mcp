@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "topview": {
+      "type": "http",
+      "url": "https://mcp.topview.ai/mcp",
+      "note": "OAuth browser sign-in on first connect (TopView account). Recon: endpoint alive, returns invalid_token unauthenticated. Plan gate: MCP workflows excluded on TopView 'Unlimited' plan."
+    }
+  }
+}
