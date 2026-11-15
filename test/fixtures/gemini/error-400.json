@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": 400,
+    "message": "Invalid value at 'response_format.aspect_ratio' (type '7:3'): aspect_ratio must be one of 1:1, 2:3, 3:2, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.",
+    "status": "INVALID_ARGUMENT"
+  }
+}

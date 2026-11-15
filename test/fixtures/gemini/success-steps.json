@@ -1,0 +1,15 @@
+{
+  "id": "int-fixture-steps",
+  "steps": [
+    {
+      "type": "model_output",
+      "output": [
+        {
+          "type": "image",
+          "mime_type": "image/png",
+          "data": "aGVsbG8="
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "interaction": {
+    "id": "int-fixture-output-image"
+  },
+  "output_image": {
+    "mime_type": "image/png",
+    "data": "aGVsbG8="
+  }
+}
