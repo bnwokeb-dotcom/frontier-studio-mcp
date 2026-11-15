@@ -27,7 +27,9 @@ export function toMcpError(e: unknown): unknown {
   return e;
 }
 
-async function guard<T>(fn: () => Promise<T>): Promise<T> {
+// Exported for the image-lane tools (src/tools/image.ts) — the guard→MCP error
+// map and the JSON text-block wrapper are shared, never duplicated.
+export async function guard<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (e) {
@@ -35,7 +37,7 @@ async function guard<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-function out(x: unknown) {
+export function out(x: unknown) {
   return { content: [{ type: 'text' as const, text: typeof x === 'string' ? x : JSON.stringify(x, null, 2) }] };
 }
 

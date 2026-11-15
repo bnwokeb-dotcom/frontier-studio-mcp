@@ -37,10 +37,10 @@ const isError = (res: unknown) => (res as { isError?: boolean }).isError === tru
 const codeOf = (e: unknown) => (e as { code?: number }).code;
 
 describe('MCP registry tools', () => {
-  it('exposes exactly the 8 registry tools', async () => {
+  it('exposes the 8 registry tools + image_generate', async () => {
     const res = await client.listTools();
     expect(res.tools.map((t) => t.name).sort()).toEqual([
-      'asset_register', 'film_create', 'film_set_active', 'film_show',
+      'asset_register', 'film_create', 'film_set_active', 'film_show', 'image_generate',
       'sequence_lock_geo', 'shot_create', 'shot_show', 'shot_update',
     ]);
   });

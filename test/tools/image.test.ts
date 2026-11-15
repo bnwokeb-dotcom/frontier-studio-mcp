@@ -1,0 +1,256 @@
+// test/tools/image.test.ts — image_generate: billed, budgeted, ledgered.
+// Fixture-injected: GeminiLane's FetchLike defaults to the global fetch, so the
+// tests stub global fetch with the recorded fixture body (no network, no creds).
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { buildServer } from '../../src/server.js';
+import type { FetchLike } from '../../src/lanes/types.js';
+
+// Recorded fixture: JSON body only — fake base64 'aGVsbG8=' ('hello'), no real images, no credentials, no network.
+const successBody = readFileSync(
+  new URL('../fixtures/gemini/success-output-image.json', import.meta.url),
+  'utf8',
+);
+
+interface RecordedCall {
+  url: string;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
+let root: string;
+let client: Client;
+let server: Awaited<ReturnType<typeof buildServer>>;
+let calls: RecordedCall[];
+
+const fetchOk: FetchLike = async (url, init) => {
+  calls.push({ url, method: init?.method, headers: init?.headers, body: init?.body });
+  return { ok: true, status: 200, text: async () => successBody };
+};
+const fetchNever: FetchLike = () => {
+  throw new Error('network touched — refusal must precede any API call');
+};
+
+beforeEach(async () => {
+  root = await mkdtemp(join(tmpdir(), 'fsm-image-'));
+  calls = [];
+  vi.stubEnv('GEMINI_API_KEY', 'test-key');
+  vi.stubGlobal('fetch', fetchOk);
+  server = buildServer({ studioRoot: root });
+  // R-client-order: construct the client BEFORE connecting either end.
+  client = new Client({ name: 'test', version: '0' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([server.connect(a), client.connect(b)]);
+});
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  await Promise.all([client.close(), server.close()]);
+  await rm(root, { recursive: true, force: true });
+});
+
+function rpc(name: string, args: Record<string, unknown>) {
+  return client.callTool({ name, arguments: args });
+}
+const isError = (res: unknown) => (res as { isError?: boolean }).isError === true;
+
+function recordOf(res: unknown): Record<string, unknown> {
+  const text = (res as { content: { text: string }[] }).content[0].text;
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+async function filmJson(filmId: string): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(join(root, 'films', filmId, 'film.json'), 'utf8')) as Record<string, unknown>;
+}
+
+async function ledgerLines(filmId: string): Promise<Record<string, unknown>[]> {
+  const raw = await readFile(join(root, 'films', filmId, 'ledger.jsonl'), 'utf8');
+  return raw.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+}
+
+async function seedFilm(filmId = 'film_x', budgetUsd?: number) {
+  await rpc('film_create', {
+    film_id: filmId, title: 'X', logline: 'Y',
+    ...(budgetUsd !== undefined ? { budget_usd: budgetUsd } : {}),
+  });
+  await rpc('film_set_active', { film_id: filmId });
+}
+
+describe('image_generate happy path (fixture fetch)', () => {
+  it('generates, writes the artifact bytes, ledgers one line, accrues spentUsd', async () => {
+    await seedFilm('film_x', 1);
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'hero.png'), 'refbytes');
+
+    const res = await rpc('image_generate', {
+      prompt: 'A lone lighthouse at dusk, 35mm',
+      ref_image_paths: ['refs/hero.png'], // film-relative, resolves under the film dir
+    });
+    expect(isError(res)).toBe(false);
+
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual([
+      'artifact_path', 'aspect_ratio', 'cost_usd', 'image_size', 'interaction_id',
+    ]);
+    expect(o.interaction_id).toBe('int-fixture-output-image');
+    expect(o.cost_usd).toBe(0.134);
+    expect(o.image_size).toBe('1K'); // default
+    expect(o.aspect_ratio).toBe('16:9'); // default
+
+    // artifact exists on disk with the fixture base64 decoded: 'aGVsbG8=' → 104 101 108 108 111
+    expect(String(o.artifact_path)).toMatch(/films\/film_x\/generated\/\d{8}-\d{6}-a-lone-lighthouse-at-dusk-35mm\.png$/);
+    const bytes = await readFile(String(o.artifact_path));
+    expect(Array.from(bytes)).toEqual([104, 101, 108, 108, 111]);
+
+    // exactly one API call; the ref rides along with its extension-inferred mime
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://generativelanguage.googleapis.com/v1beta/interactions');
+    const body = JSON.parse(calls[0].body as string);
+    expect(body.input[1]).toEqual({
+      type: 'image',
+      mime_type: 'image/png',
+      data: Buffer.from('refbytes').toString('base64'),
+    });
+
+    // ledger line count 1, full shape
+    const lines = await ledgerLines('film_x');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toEqual({
+      ts: expect.any(String),
+      tool: 'image_generate',
+      lane: 'gemini',
+      film_id: 'film_x',
+      cost_usd: 0.134,
+      verdict: 'pending',
+      interaction_id: 'int-fixture-output-image',
+      artifact_path: String(o.artifact_path),
+    });
+
+    // spend accrued on the film
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.134, 12);
+  });
+
+  it('resolves studio-root-relative refs and infers .jpg → image/jpeg', async () => {
+    await seedFilm('film_x', 1);
+    await mkdir(join(root, 'refs'), { recursive: true });
+    await writeFile(join(root, 'refs', 'hero.jpg'), 'jpgbytes');
+
+    const res = await rpc('image_generate', { prompt: 'x', ref_image_paths: ['refs/hero.jpg'] });
+    expect(isError(res)).toBe(false);
+    const body = JSON.parse(calls[0].body as string);
+    expect(body.input[1]).toEqual({
+      type: 'image',
+      mime_type: 'image/jpeg',
+      data: Buffer.from('jpgbytes').toString('base64'),
+    });
+  });
+});
+
+describe('image_generate refusals (each precedes any API call where billed)', () => {
+  it('no GEMINI_API_KEY → AUTH, and nothing is fetched, written or ledged', async () => {
+    vi.stubEnv('GEMINI_API_KEY', '');
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/GEMINI_API_KEY is not set/);
+    expect(JSON.stringify(res)).toMatch(/NEXT: /);
+    expect(calls).toHaveLength(0);
+    await expect(readFile(join(root, 'films', 'film_x', 'ledger.jsonl'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+  });
+
+  it('film without a budget → BUDGET refusal', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_nobudget'); // no budget_usd
+
+    const res = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/no budget set on film \\?"film_nobudget\\?"/); // \" escaped inside the stringified result
+    expect(calls).toHaveLength(0);
+  });
+
+  it('over-budget → BUDGET before any fetch (fake fetch throws if called)', async () => {
+    await seedFilm('film_capped', 0.25);
+    // first generation succeeds and accrues 0.134
+    const first = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(first)).toBe(false);
+    expect(calls).toHaveLength(1);
+
+    // second one is refused: 0.134 spent + 0.134 quote > 0.25 cap — fetch must never fire
+    vi.stubGlobal('fetch', fetchNever);
+    const res = await rpc('image_generate', { prompt: 'x again' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/budget exceeded: 0\.134 spent \+ 0\.134 quote > 0\.25 cap/);
+    expect(calls).toHaveLength(1); // only the first call's fetch
+    expect((await ledgerLines('film_capped'))).toHaveLength(1); // no ledger line for the refusal
+    expect((await filmJson('film_capped')).spentUsd).toBeCloseTo(0.134, 12); // spend unchanged
+  });
+
+  it('15 refs → VALIDATION naming the max', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', {
+      prompt: 'x',
+      ref_image_paths: Array.from({ length: 15 }, (_, i) => `refs/r${i}.png`),
+    });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/too many ref_image_paths: 15 \(max 14\)/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('missing ref file → NOT_FOUND (absolute path resolved as-is)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', {
+      prompt: 'x',
+      ref_image_paths: [join(root, 'films', 'film_x', 'refs', 'ghost.png')],
+    });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/reference image not found/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('empty prompt → VALIDATION "prompt is required"', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: '   ' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/prompt is required/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('empty previous_interaction_id → VALIDATION (must be a non-empty string)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: 'x', previous_interaction_id: '' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/previous_interaction_id must be a non-empty string/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('unknown ref extension → VALIDATION naming the supported set', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'hero.tiff'), 'tiffbytes');
+
+    const res = await rpc('image_generate', { prompt: 'x', ref_image_paths: ['refs/hero.tiff'] });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/unsupported reference image type \\?"\.tiff\\?"/); // \" escaped inside the stringified result
+    expect(JSON.stringify(res)).toMatch(/\.png, \.jpg, \.jpeg or \.webp/);
+    expect(calls).toHaveLength(0);
+  });
+});
