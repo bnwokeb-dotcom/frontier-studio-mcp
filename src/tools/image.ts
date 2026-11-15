@@ -7,16 +7,18 @@
 // → write artifact → recordSpend → ledger line. Every refusal (validation,
 // NOT_FOUND, AUTH, BUDGET) precedes the API call by construction.
 import { z } from 'zod';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { studioPaths } from '../store/paths.js';
 import type { StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
-import { appendLine, ensureDir } from '../store/fs.js';
+import { appendLine, ensureDir, readText, writeText } from '../store/fs.js';
+import { attachImage, findAssetKindDir } from '../store/asset.js';
 import { ensureBudget, recordSpend } from '../budget.js';
 import { GeminiLane } from '../lanes/gemini.js';
 import { errNotFound, errValidation } from '../errors.js';
+import { characterSheetPrompt } from './prompts.js';
 import { guard, out } from './registry.js';
 
 const MAX_REFS = 14;
@@ -44,26 +46,35 @@ function stampOf(d: Date): string {
 
 // Absolute paths pass through as-is; relative paths resolve against STUDIO_ROOT
 // first, then the film dir (so `films/<id>/refs/x.png` and `refs/x.png` both
-// work). Missing everywhere → NOT_FOUND; unsupported extension → VALIDATION
-// naming the supported set. Existence is checked before the extension so a
-// missing file never masquerades as a type refusal.
+// work). Returns the first candidate that reads, with its bytes; undefined when
+// none exist (the caller words its own NOT_FOUND).
+async function readFirstExisting(
+  studioRoot: string,
+  filmDir: string,
+  raw: string,
+): Promise<{ path: string; data: Buffer } | undefined> {
+  const candidates = isAbsolute(raw) ? [raw] : [join(studioRoot, raw), join(filmDir, raw)];
+  for (const candidate of candidates) {
+    try {
+      return { path: candidate, data: await readFile(candidate) };
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+  }
+  return undefined;
+}
+
+// Missing everywhere → NOT_FOUND; unsupported extension → VALIDATION naming the
+// supported set. Existence is checked before the extension so a missing file
+// never masquerades as a type refusal.
 async function readRefImage(
   paths: StudioPaths,
   studioRoot: string,
   filmId: string,
   raw: string,
 ): Promise<{ data: Buffer; mimeType: string }> {
-  const candidates = isAbsolute(raw) ? [raw] : [join(studioRoot, raw), join(paths.filmDir(filmId), raw)];
-  let data: Buffer | undefined;
-  for (const candidate of candidates) {
-    try {
-      data = await readFile(candidate);
-      break;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-    }
-  }
-  if (!data) {
+  const found = await readFirstExisting(studioRoot, paths.filmDir(filmId), raw);
+  if (!found) {
     throw errNotFound(
       `reference image not found: ${raw}`,
       'use an absolute path, a STUDIO_ROOT-relative path, or a film-relative path that exists',
@@ -77,7 +88,7 @@ async function readRefImage(
       'reference images must be .png, .jpg, .jpeg or .webp',
     );
   }
-  return { data, mimeType };
+  return { data: found.data, mimeType };
 }
 
 export function registerImageTools(server: McpServer, studioRoot: string): void {
@@ -172,5 +183,145 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
       image_size: req.imageSize,
       aspect_ratio: req.aspectRatio,
     });
+  }));
+
+  // The Hell Grind sheet law, billed: descriptor.md → sheet prompt → 1K/16:9 →
+  // budget → lane → attach as the asset's canonical sheet.png. Same binding
+  // order as image_generate; the sheet becomes the multi-turn seed.
+  server.tool('character_sheet_build', {
+    asset_id: z.string(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    // 1. validate args
+    if (!a.asset_id.trim()) {
+      throw errValidation('asset_id is required', 'pass the character asset_id to sheet');
+    }
+
+    // 2. film: explicit id or the active one
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+
+    // 3. resolve the asset BEFORE the quote — no refusal may follow the budget
+    // check. Explicit kind probe (findAssetKindDir): a non-character id fails
+    // here with its actual kind named, never as a silent characters-path miss.
+    const kindDir = await findAssetKindDir(paths, filmId, a.asset_id);
+    if (!kindDir) {
+      throw errNotFound(
+        `asset "${a.asset_id}" is not registered`,
+        'register it with asset_register before building its sheet',
+      );
+    }
+    if (kindDir !== 'characters') {
+      throw errNotFound(
+        `asset "${a.asset_id}" is a ${kindDir} asset — character_sheet_build sheets characters only`,
+        'pass a character asset_id, or attach a location plate with asset_image',
+      );
+    }
+    const assetDir = paths.assetDir(filmId, kindDir, a.asset_id);
+    const descriptor = await readText(`${assetDir}/descriptor.md`);
+
+    // 4. compose the sheet law (pure; VALIDATION on a whitespace-only descriptor)
+    const prompt = characterSheetPrompt(descriptor);
+
+    // 5. lane + quote (lazily, per call) — sheets are 1K, 16:9 by law
+    const lane = GeminiLane.fromConfig({
+      studioRoot,
+      geminiApiKey: process.env.GEMINI_API_KEY || undefined,
+      studioLive: process.env.STUDIO_LIVE === '1',
+    });
+    const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
+    const price = lane.price(req);
+
+    // 6. hard stop BEFORE the API call
+    await ensureBudget(paths, filmId, price);
+
+    // 7. generate (synchronous: submit caches the body, result reads it back)
+    const interaction = await lane.submit(req);
+    const artifact = await lane.result(interaction);
+
+    // 8. attach as the canonical sheet.png via attachImage. The lane bytes are
+    // staged under the standard generated/ naming, copied, then the staging
+    // copy is dropped (best-effort: a leftover is a well-named generated
+    // artifact, never garbage) — the asset dir keeps the only copy.
+    const generatedDir = `${paths.filmDir(filmId)}/generated`;
+    const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
+    await ensureDir(generatedDir);
+    await writeFile(stagedPath, artifact.data);
+    const sheetPath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'sheet.png');
+    try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
+
+    // 9. the multi-turn seed for this asset's future generations — ONLY the id
+    await writeText(`${assetDir}/interaction.md`, artifact.interactionId);
+
+    // 10. spend accrues ONLY after a successful artifact
+    await recordSpend(paths, filmId, artifact.priceUsd);
+
+    // 11. ledger line (Task 3 shape; the durable artifact is the attached sheet)
+    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: 'character_sheet_build',
+      lane: 'gemini',
+      film_id: filmId,
+      cost_usd: artifact.priceUsd,
+      verdict: 'pending',
+      interaction_id: artifact.interactionId,
+      artifact_path: sheetPath,
+    }));
+
+    // 12. snake_case wire output
+    return out({
+      sheet_path: sheetPath,
+      interaction_id: artifact.interactionId,
+      cost_usd: artifact.priceUsd,
+    });
+  }));
+
+  // Free tool: a straight byte copy into an asset dir — no lane, no budget, no
+  // ledger. Name defaults to the asset kind's canonical image; an explicit name
+  // goes through the same attachImage validation.
+  server.tool('asset_image', {
+    asset_id: z.string(),
+    image_path: z.string(),
+    name: z.string().optional(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    if (!a.asset_id.trim()) {
+      throw errValidation('asset_id is required', 'pass the asset to attach the image to');
+    }
+    if (!a.image_path.trim()) {
+      throw errValidation('image_path is required', 'pass the path of the image file to attach');
+    }
+
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+
+    // resolve the asset kind by probe; unknown id → NOT_FOUND
+    const kindDir = await findAssetKindDir(paths, filmId, a.asset_id);
+    if (!kindDir) {
+      throw errNotFound(
+        `asset "${a.asset_id}" is not registered`,
+        'register it with asset_register (characters take sheet.png, locations take plate.png)',
+      );
+    }
+    const name = a.name
+      ?? (kindDir === 'characters' ? 'sheet.png' : undefined)
+      ?? (kindDir === 'locations' ? 'plate.png' : undefined);
+    if (!name) {
+      throw errValidation(
+        `${kindDir} assets have no canonical image (sheet.png is characters, plate.png is locations)`,
+        'register the asset as a character or location to carry a canonical image',
+      );
+    }
+
+    const found = await readFirstExisting(studioRoot, paths.filmDir(filmId), a.image_path);
+    if (!found) {
+      throw errNotFound(
+        `image not found: ${a.image_path}`,
+        'use an absolute path, a STUDIO_ROOT-relative path, or a film-relative path that exists',
+      );
+    }
+
+    const assetPath = await attachImage(paths, filmId, kindDir, a.asset_id, found.path, name);
+    return out({ asset_path: assetPath });
   }));
 }

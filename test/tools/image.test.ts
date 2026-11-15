@@ -3,7 +3,7 @@
 // tests stub global fetch with the recorded fixture body (no network, no creds).
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -252,5 +252,196 @@ describe('image_generate refusals (each precedes any API call where billed)', ()
     expect(JSON.stringify(res)).toMatch(/unsupported reference image type \\?"\.tiff\\?"/); // \" escaped inside the stringified result
     expect(JSON.stringify(res)).toMatch(/\.png, \.jpg, \.jpeg or \.webp/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+// --- Task 4: character_sheet_build + asset_image ------------------------------
+
+const DESCRIPTOR = 'A weathered trawler captain, mid-50s, salt-grey beard, patched oilskin coat';
+
+async function seedCharacter(filmId = 'film_x', assetId = 'mara', budgetUsd?: number) {
+  await seedFilm(filmId, budgetUsd ?? 1);
+  await rpc('asset_register', {
+    kind: 'character', asset_id: assetId, descriptor: DESCRIPTOR,
+    voice: 'low, gravel, unhurried coastal drawl',
+    acting: 'still until spoken to; moves in short decisive bursts',
+  });
+}
+
+describe('character_sheet_build (fixture fetch)', () => {
+  it('composes the sheet law, attaches sheet.png, seeds interaction.md, ledgers, accrues spend', async () => {
+    await seedCharacter();
+
+    const res = await rpc('character_sheet_build', { asset_id: 'mara' });
+    expect(isError(res)).toBe(false);
+
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual(['cost_usd', 'interaction_id', 'sheet_path']);
+    expect(o.interaction_id).toBe('int-fixture-output-image');
+    expect(o.cost_usd).toBe(0.134);
+    expect(String(o.sheet_path)).toMatch(/films\/film_x\/assets\/characters\/mara\/sheet\.png$/);
+
+    // sheet.png holds the fixture image bytes ('aGVsbG8=' decoded)
+    expect(Array.from(await readFile(String(o.sheet_path)))).toEqual([104, 101, 108, 108, 111]);
+
+    // interaction.md contains ONLY the interaction id — byte-exact, no newline
+    expect(await readFile(join(root, 'films', 'film_x', 'assets', 'characters', 'mara', 'interaction.md'), 'utf8'))
+      .toBe('int-fixture-output-image');
+
+    // exactly one API call, carrying the sheet law at the 1K/16:9 defaults
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(calls[0].body as string);
+    expect(body.input).toHaveLength(1); // no ref images
+    expect(body.input[0].type).toBe('text');
+    expect(body.input[0].text).toContain(DESCRIPTOR);
+    expect(body.input[0].text).toContain('HEADLESS');
+    expect(body.input[0].text).toContain('#e8e8e8');
+    expect(body.response_format).toEqual({
+      type: 'image', mime_type: 'image/png', aspect_ratio: '16:9', image_size: '1K',
+    });
+
+    // the staging copy is gone after the attach — the asset dir keeps the only bytes
+    expect(await readdir(join(root, 'films', 'film_x', 'generated'))).toEqual([]);
+
+    // one ledger line, Task 3 shape, artifact = the attached sheet
+    const lines = await ledgerLines('film_x');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toEqual({
+      ts: expect.any(String),
+      tool: 'character_sheet_build',
+      lane: 'gemini',
+      film_id: 'film_x',
+      cost_usd: 0.134,
+      verdict: 'pending',
+      interaction_id: 'int-fixture-output-image',
+      artifact_path: String(o.sheet_path),
+    });
+
+    // spend accrued on the film
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.134, 12);
+  });
+});
+
+describe('character_sheet_build refusals (each precedes any API call)', () => {
+  it('unknown asset → NOT_FOUND before any fetch', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('character_sheet_build', { asset_id: 'ghost' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/asset \\?"ghost\\?" is not registered/); // \" escaped inside the stringified result
+    expect(calls).toHaveLength(0);
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+  });
+
+  it('location asset → NOT_FOUND naming its kind (explicit kind probe, not a blind characters-path hit)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+    await rpc('asset_register', { kind: 'location', asset_id: 'docks', descriptor: 'Rain-slicked fishing docks, diesel and brine' });
+
+    const res = await rpc('character_sheet_build', { asset_id: 'docks' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/is a locations asset/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('whitespace-only asset_id → VALIDATION', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('character_sheet_build', { asset_id: '  ' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/asset_id is required/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('over-budget → BUDGET before any fetch', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 0.1);
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+
+    const res = await rpc('character_sheet_build', { asset_id: 'mara' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/budget exceeded: 0 spent \+ 0\.134 quote > 0\.1 cap/);
+    expect(calls).toHaveLength(0);
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+  });
+});
+
+describe('asset_image (free tool: no lane, no budget, no ledger)', () => {
+  it('copies bytes identically into the character dir as sheet.png', async () => {
+    vi.stubGlobal('fetch', fetchNever); // free: must never touch the network
+    await seedFilm('film_free'); // deliberately NO budget — free tools never see ensureBudget
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+    await mkdir(join(root, 'films', 'film_free', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_free', 'refs', 'hand-drawn.png'), 'sheetbytes');
+
+    const res = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/hand-drawn.png' });
+    expect(isError(res)).toBe(false);
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual(['asset_path']);
+    expect(String(o.asset_path)).toMatch(/films\/film_free\/assets\/characters\/mara\/sheet\.png$/);
+    expect(await readFile(String(o.asset_path), 'utf8')).toBe('sheetbytes');
+    // copy, not move — the source file stays
+    expect(await readFile(join(root, 'films', 'film_free', 'refs', 'hand-drawn.png'), 'utf8')).toBe('sheetbytes');
+    // free: no ledger line is ever written
+    await expect(readFile(join(root, 'films', 'film_free', 'ledger.jsonl'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('defaults the name to plate.png for locations', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'location', asset_id: 'docks', descriptor: 'Rain-slicked fishing docks' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'docks.png'), 'platebytes');
+
+    const res = await rpc('asset_image', { asset_id: 'docks', image_path: 'refs/docks.png' });
+    expect(isError(res)).toBe(false);
+    expect(String(recordOf(res).asset_path)).toMatch(/assets\/locations\/docks\/plate\.png$/);
+    expect(await readFile(join(root, 'films', 'film_x', 'assets', 'locations', 'docks', 'plate.png'), 'utf8')).toBe('platebytes');
+  });
+
+  it('unknown asset → NOT_FOUND', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+
+    const res = await rpc('asset_image', { asset_id: 'ghost', image_path: 'refs/x.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/asset \\?"ghost\\?" is not registered/); // \" escaped inside the stringified result
+  });
+
+  it('missing image file → NOT_FOUND', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+
+    const res = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/ghost.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/image not found: refs\/ghost\.png/);
+  });
+
+  it('name outside sheet.png/plate.png → VALIDATION naming the rule', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'face.png'), 'bytes');
+
+    const res = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/face.png', name: 'face.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/asset images are sheet\.png or plate\.png/);
+  });
+
+  it('name/kind mismatch → VALIDATION naming the rule', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'plate.png'), 'bytes');
+
+    const res = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/plate.png', name: 'plate.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/plate\.png is a locations image/);
   });
 });

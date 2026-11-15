@@ -1,5 +1,6 @@
 // src/store/asset.ts
-import { writeText, readText } from './fs.js';
+import { copyFile, readFile } from 'node:fs/promises';
+import { writeText, readText, ensureDir } from './fs.js';
 import { errValidation, errNotFound } from '../errors.js';
 import { assertId, filmMetaOrThrow } from './film.js';
 import type { AssetKindDir, StudioPaths } from './paths.js';
@@ -56,6 +57,77 @@ export async function assertAssetExists(paths: StudioPaths, filmId: string, kind
     throw errNotFound(`asset "${assetId}" (${kindDir}) is not registered`, 'register it with asset_register before referencing it in shots');
   }
   return dir;
+}
+
+// The four kind dirs, in probe order — deterministic when the same asset_id is
+// (pathologically) registered under two kinds: the earliest hit wins.
+const PROBE_ORDER: AssetKindDir[] = ['characters', 'locations', 'props', 'styles'];
+
+// Which kind dir holds the asset (descriptor.md present)? undefined → registered
+// nowhere. Callers turn undefined into NOT_FOUND with their own wording; a hit
+// under a non-character kind is also the explicit kind check for tools that are
+// character-only (e.g. character_sheet_build), so a location id fails with its
+// actual kind named instead of a blind "no file under characters/".
+export async function findAssetKindDir(paths: StudioPaths, filmId: string, assetId: string): Promise<AssetKindDir | undefined> {
+  for (const kindDir of PROBE_ORDER) {
+    try {
+      await readFile(`${paths.assetDir(filmId, kindDir, assetId)}/descriptor.md`);
+      return kindDir;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+  }
+  return undefined;
+}
+
+// Canonical asset images only: a character's sheet, a location's plate. The
+// name↔kind pairing is the law — sheet.png is a character file, plate.png a
+// location file — so a plate can never masquerade as a sheet.
+const ASSET_IMAGE_NAME = /^sheet\.png$|^plate\.png$/;
+
+export async function attachImage(
+  paths: StudioPaths,
+  filmId: string,
+  kindDir: AssetKindDir,
+  assetId: string,
+  srcPath: string,
+  name: string,
+): Promise<string> {
+  // pure arg validation first, then existence, then the effect
+  if (!ASSET_IMAGE_NAME.test(name)) {
+    throw errValidation(
+      `asset images are sheet.png or plate.png (got "${name}")`,
+      'name the image sheet.png (characters) or plate.png (locations)',
+    );
+  }
+  if (name === 'sheet.png' && kindDir !== 'characters') {
+    throw errValidation(
+      'sheet.png is a characters image',
+      `asset "${assetId}" is a ${kindDir} asset — plate.png is the locations image`,
+    );
+  }
+  if (name === 'plate.png' && kindDir !== 'locations') {
+    throw errValidation(
+      'plate.png is a locations image',
+      `asset "${assetId}" is a ${kindDir} asset — sheet.png is the characters image`,
+    );
+  }
+  await assertAssetExists(paths, filmId, kindDir, assetId);
+  const dir = paths.assetDir(filmId, kindDir, assetId);
+  const dest = `${dir}/${name}`;
+  await ensureDir(dir);
+  try {
+    await copyFile(srcPath, dest);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw errNotFound(
+        `image not found: ${srcPath}`,
+        'use an absolute path, a STUDIO_ROOT-relative path, or a film-relative path that exists',
+      );
+    }
+    throw e;
+  }
+  return dest;
 }
 
 export async function assetRefCheck(paths: StudioPaths, filmId: string, ref: { assetId: string; role: string }): Promise<void> {
