@@ -588,3 +588,67 @@ describe('keyframe_build refusals (each precedes any API call)', () => {
     expect((await filmJson('film_x')).spentUsd).toBeUndefined();
   });
 });
+
+// --- Task 6: multi-turn editing — the interaction_id loop, end to end ---------
+//
+// The loop agents will actually drive: take a generation → read its returned
+// interaction_id (or the asset's on-disk interaction.md seed) → feed it back as
+// previous_interaction_id → assert the NEXT request body carried it. The fixture
+// fetch records every call body, so the chain is provable without network.
+
+describe('multi-turn editing (interaction_id loop end-to-end)', () => {
+  it('image_generate → returned interaction_id → image_generate(previous_interaction_id) rides in the next body', async () => {
+    await seedFilm('film_x', 1); // two takes = 0.268 < 1
+
+    // turn 1: a fresh generation must NOT carry a previous_interaction_id
+    const first = await rpc('image_generate', { prompt: 'A lone lighthouse at dusk, 35mm' });
+    expect(isError(first)).toBe(false);
+    const firstId = recordOf(first).interaction_id;
+    expect(firstId).toBe('int-fixture-output-image');
+    expect(JSON.parse(calls[0].body as string)).not.toHaveProperty('previous_interaction_id');
+
+    // turn 2: the agent feeds turn 1's id back verbatim
+    const second = await rpc('image_generate', {
+      prompt: 'The same lighthouse, now wrapped in fog',
+      previous_interaction_id: firstId,
+    });
+    expect(isError(second)).toBe(false);
+
+    const body2 = JSON.parse(calls[1].body as string);
+    expect(body2.previous_interaction_id).toBe(firstId);
+
+    // both turns billed and ledgered against the same film
+    expect(await ledgerLines('film_x')).toHaveLength(2);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.268, 12);
+  });
+
+  it('character_sheet_build → interaction.md seed → image_generate(previous_interaction_id)', async () => {
+    await seedCharacter('film_x', 'mara');
+
+    // the sheet is the multi-turn seed; its id lands in interaction.md
+    const sheet = await rpc('character_sheet_build', { asset_id: 'mara' });
+    expect(isError(sheet)).toBe(false);
+    const sheetId = recordOf(sheet).interaction_id;
+    expect(sheetId).toBe('int-fixture-output-image');
+
+    // read the on-disk seed the way an agent would (byte-exact, no newline)
+    const seeded = await readFile(
+      join(root, 'films', 'film_x', 'assets', 'characters', 'mara', 'interaction.md'),
+      'utf8',
+    );
+    expect(seeded).toBe(sheetId);
+
+    // the seeded id drives the next billed generation
+    const res = await rpc('image_generate', {
+      prompt: 'Mara at the wheel of the trawler, midnight',
+      previous_interaction_id: seeded,
+    });
+    expect(isError(res)).toBe(false);
+
+    const body2 = JSON.parse(calls[1].body as string);
+    expect(body2.previous_interaction_id).toBe(sheetId);
+    expect(body2.previous_interaction_id).toBe('int-fixture-output-image');
+
+    expect(await ledgerLines('film_x')).toHaveLength(2); // sheet take + image take
+  });
+});
