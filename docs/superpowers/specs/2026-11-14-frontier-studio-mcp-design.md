@@ -134,6 +134,10 @@ cost_usd, verdict: kept|rejected|pending, why?, prompt_version?}`
 **Jobs** (jobs.json): `{job_id, shot_id, lane, parent_job_id?, status, submitted_ts,
 completed_ts?, error_verbatim?, artifact_path?, cost_usd}`
 
+Errata (2026-11-15, M1 final review): the on-disk shot record stores camelCase keys
+(geoBlock, assetId, durationS); §6's snake_case keys describe the MCP wire format, which
+toWire/fromWirePatch in src/tools/registry.ts own in both directions.
+
 ## 7. Tool surface
 
 **Registry (free):**

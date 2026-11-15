@@ -25,4 +25,8 @@ describe('sequence geo lock', () => {
     await expect(sequenceLockGeo(paths, 'film_t', 'seq01', 'GEO-B'))
       .rejects.toMatchObject({ code: 'VALIDATION' });
   });
+  it('refuses an unlawful sequence id (ID law, before anything else)', async () => {
+    await expect(sequenceLockGeo(paths, 'film_t', 'Bad Seq!', 'GEO-A'))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/invalid sequence id/) });
+  });
 });

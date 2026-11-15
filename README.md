@@ -29,14 +29,14 @@ No credentials are required for the M1 registry core; only `STUDIO_ROOT` matters
 | ------------------- | --------------------------------------------------------------------------- |
 | `film_create`       | Register a film (`film_id`, `title`, `logline`, optional budget/runtime); it becomes the active film. |
 | `film_set_active`   | Point subsequent film-scoped calls at the given film.                        |
-| `film_show`         | Show film meta, sequence geo locks, universe links (active film if `film_id` omitted). |
+| `film_show`         | Show the active film: meta, sequence geo locks, universe links. |
 | `asset_register`    | Register a `character`/`location`/`prop`/`style` asset from a `descriptor`; characters must also carry `voice` + `acting` blocks. |
 | `shot_create`       | Create a shot: verbatim `geo_block`, `refs`, full `camera` (lens/move/reason), `audio_block`, `duration_s` 1–30. |
 | `shot_update`       | Patch a shot; `id` is immutable, geo locks re-verify verbatim, `audio_block` merges per-key. |
 | `shot_show`         | Read the full shot record (status, geo, refs, camera, audio, takes).         |
 | `sequence_lock_geo` | Lock a sequence's geo block verbatim; idempotent — different text is refused. |
 
-Film-scoped tools accept an optional `film_id`; omit it and the active film is used (a clear `NOT_FOUND` refusal tells you to set one if there is none).
+`film_show` takes no arguments — it always shows the active film. The other film-scoped tools (`asset_register`, `shot_create`, `shot_update`, `shot_show`, `sequence_lock_geo`) accept an optional `film_id`; omit it and the active film is used (a clear `NOT_FOUND` refusal tells you to set one if there is none).
 
 ## Run
 
@@ -71,7 +71,7 @@ STUDIO_ROOT/
         │   └── styles/<asset_id>/       descriptor.md
         ├── shots/<shot_id>.json    # full shot records
         ├── renders/                # (M2/M3 lane output)
-        ├── jobs.json               # (M4 lane jobs)
+        ├── jobs.json               # (M3 lane jobs)
         └── ledger.jsonl            # (M4 cost ledger)
 ```
 

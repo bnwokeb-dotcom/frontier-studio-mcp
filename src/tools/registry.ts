@@ -1,17 +1,19 @@
 // src/tools/registry.ts — the 8 registry tools, wired onto an McpServer.
 //
-// Wire discipline (plan, Type consistency): snake_case argument names at the MCP
-// boundary, camelCase in the store. All wire → store mapping lives in this file only.
+// Wire discipline (plan, Type consistency): the MCP boundary is snake_case in
+// BOTH directions — arguments AND tool output — while the store stays camelCase.
+// fromWirePatch/toWire here own the mapping; clients can echo tool output back
+// into a patch verbatim. Unknown patch keys are refused loudly, never dropped.
 import { z } from 'zod';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { studioPaths } from '../store/paths.js';
-import { filmCreate, filmShow } from '../store/film.js';
+import { filmCreate, filmShow, type FilmMeta } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
 import { assetRegister } from '../store/asset.js';
-import { shotCreate, shotUpdate, shotShow, type AudioBlock, type ShotRecord } from '../store/shot.js';
+import { shotCreate, shotUpdate, shotShow, type AudioBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
-import { StudioError } from '../errors.js';
+import { StudioError, errValidation } from '../errors.js';
 
 // Error map (binding ruling): VALIDATION|NOT_FOUND → -32602 (InvalidParams);
 // AUTH|BUDGET|LANE_DOWN|JOB_FAILED → -32000 (implementation-defined server error).
@@ -58,24 +60,107 @@ const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
   return audio;
 };
 
-// shot_update patch: snake_case wire keys → camelCase store keys. Only known
-// ShotRecord fields pass; unknown keys are dropped. The store re-validates the
-// merged record, so a malformed patch surfaces as a doctrine refusal.
+// shot_update patch: snake_case wire keys → camelCase store keys. The patch is
+// built ONLY from the known snake_case keys; ANY other key is refused loudly —
+// a silently dropped key would turn an echo-driven patch into a silent no-op.
+// The store re-validates the merged record, so malformed values surface as
+// doctrine refusals; wrong-typed known keys are refused here so they can never
+// be silently skipped or smuggled past the store's checks.
 // audio_block merges ONTO the current record's audioBlock (the store merges
 // shallowly, so without this a partial audio patch would drop stored keys).
+const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'audio_block', 'duration_s']);
+
+const isStr = (v: unknown): v is string => typeof v === 'string';
+const isNum = (v: unknown): v is number => typeof v === 'number';
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Partial<ShotRecord> {
   const p: Record<string, unknown> = {};
-  for (const k of ['id', 'status', 'sequence', 'camera'] as const) {
-    if (k in patch) p[k] = patch[k];
+  for (const k of Object.keys(patch)) {
+    if (!PATCH_KEYS.has(k)) {
+      throw errValidation(`unknown patch key "${k}"`,
+        'allowed keys: geo_block, refs, camera, audio_block, duration_s, status');
+    }
   }
-  if (typeof patch.geo_block === 'string') p.geoBlock = patch.geo_block;
-  if (typeof patch.duration_s === 'number') p.durationS = patch.duration_s;
-  if (Array.isArray(patch.refs)) p.refs = (patch.refs as WireRef[]).map(toStoreRef);
-  if ('audio_block' in patch && patch.audio_block && typeof patch.audio_block === 'object') {
-    const wireAudio = toStoreAudio(patch.audio_block as WireAudioBlock);
-    p.audioBlock = { ...current.audioBlock, ...wireAudio };
+  if ('status' in patch) p.status = patch.status; // store enforces the status whitelist
+  if ('sequence' in patch) p.sequence = patch.sequence; // store enforces the ID law + geo-lock re-check
+  if ('geo_block' in patch) {
+    if (!isStr(patch.geo_block)) throw errValidation('patch.geo_block must be a string', 'paste the geo block text verbatim');
+    p.geoBlock = patch.geo_block;
+  }
+  if ('duration_s' in patch) {
+    if (!isNum(patch.duration_s)) throw errValidation('patch.duration_s must be a number', 'duration is seconds, 1–30');
+    p.durationS = patch.duration_s;
+  }
+  if ('refs' in patch) {
+    if (!Array.isArray(patch.refs)) throw errValidation('patch.refs must be an array', 'send refs as [{ asset_id, role }]');
+    p.refs = (patch.refs as WireRef[]).map(toStoreRef);
+  }
+  if ('camera' in patch) {
+    if (!isObj(patch.camera)) throw errValidation('patch.camera must be an object', 'send camera as { lens, move, reason }');
+    p.camera = patch.camera;
+  }
+  if ('audio_block' in patch) {
+    if (!isObj(patch.audio_block)) throw errValidation('patch.audio_block must be an object', 'send audio_block as { dialogue?, sfx?, music? }');
+    p.audioBlock = { ...current.audioBlock, ...toStoreAudio(patch.audio_block as WireAudioBlock) };
   }
   return p as Partial<ShotRecord>;
+}
+
+// --- store → wire mapping (the mirror of the above) --------------------------
+// Tool output is snake_case too, so a client can read a shot_show record and
+// feed its keys straight back into a shot_update patch (symmetric boundary).
+
+const toWireRef = (r: ShotRef) => ({ asset_id: r.assetId, role: r.role });
+
+const toWireAudio = (b: AudioBlock | undefined): WireAudioBlock => {
+  const audio: WireAudioBlock = {};
+  if (!b) return audio;
+  if (b.dialogue !== undefined) {
+    audio.dialogue = b.dialogue.map((d) => ({
+      ...(d.voiceRef !== undefined ? { voice_ref: d.voiceRef } : {}),
+      line: d.line,
+    }));
+  }
+  if (b.sfx !== undefined) audio.sfx = b.sfx;
+  if (b.music !== undefined) audio.music = b.music;
+  return audio;
+};
+
+function toWireShot(r: ShotRecord) {
+  return {
+    id: r.id,
+    sequence: r.sequence,
+    status: r.status,
+    geo_block: r.geoBlock,
+    refs: (r.refs ?? []).map(toWireRef),
+    camera: r.camera ?? { lens: '', move: '', reason: '' },
+    audio_block: toWireAudio(r.audioBlock),
+    duration_s: r.durationS,
+    takes: (r.takes ?? []).map((t) => {
+      const w: Record<string, unknown> = { job_id: t.jobId, verdict: t.verdict };
+      if (t.costUsd !== undefined) w.cost_usd = t.costUsd;
+      if (t.notes !== undefined) w.notes = t.notes;
+      return w;
+    }),
+  };
+}
+
+function toWireFilm(m: FilmMeta) {
+  return {
+    film_id: m.filmId,
+    title: m.title,
+    logline: m.logline,
+    ...(m.budgetUsd !== undefined ? { budget_usd: m.budgetUsd } : {}),
+    ...(m.targetRuntimeMin !== undefined ? { target_runtime_min: m.targetRuntimeMin } : {}),
+    sequences: Object.fromEntries(Object.entries(m.sequences).map(([seq, lock]) => [seq, {
+      ...(lock.geoLocked !== undefined ? { geo_locked: lock.geoLocked } : {}),
+      ...(lock.budgetUsd !== undefined ? { budget_usd: lock.budgetUsd } : {}),
+    }])),
+    universe_links: m.universeLinks,
+    created_at: m.createdAt,
+  };
 }
 
 // --- tool registration ------------------------------------------------------
@@ -115,7 +200,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
 
   server.tool('film_show', {}, async () => guard(async () => {
     const filmId = await filmIdOf(undefined); // getActiveFilmOrThrow ≡ store getActiveFilm (throws NOT_FOUND when unset)
-    return out(await filmShow(paths, filmId));
+    return out(toWireFilm(await filmShow(paths, filmId)));
   }));
 
   server.tool('asset_register', {
@@ -170,21 +255,21 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       audioBlock: a.audio_block ? toStoreAudio(a.audio_block) : {},
       durationS: a.duration_s ?? 0,
     });
-    return out(record);
+    return out(toWireShot(record));
   }));
 
-  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: status, sequence, geo_block, refs, camera, audio_block, duration_s (id is immutable).', {
+  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: status, sequence, geo_block, refs, camera, audio_block, duration_s (id is immutable; unknown keys are refused).', {
     film_id: z.string().optional(),
     shot_id: z.string(),
     patch: z.record(z.unknown()),
   }, async (a) => guard(async () => {
     const filmId = await filmIdOf(a.film_id);
     const current = await shotShow(paths, filmId, a.shot_id); // NOT_FOUND surfaces before any merge
-    return out(await shotUpdate(paths, filmId, a.shot_id, fromWirePatch(a.patch, current)));
+    return out(toWireShot(await shotUpdate(paths, filmId, a.shot_id, fromWirePatch(a.patch, current))));
   }));
 
   server.tool('shot_show', { film_id: z.string().optional(), shot_id: z.string() },
-    async (a) => guard(async () => out(await shotShow(paths, await filmIdOf(a.film_id), a.shot_id))));
+    async (a) => guard(async () => out(toWireShot(await shotShow(paths, await filmIdOf(a.film_id), a.shot_id)))));
 
   server.tool('sequence_lock_geo', { film_id: z.string().optional(), sequence: z.string(), geo_block: z.string() },
     async (a) => guard(async () => {

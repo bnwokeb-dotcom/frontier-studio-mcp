@@ -90,4 +90,20 @@ describe('shot validation matrix', () => {
       .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/immutable/) });
     expect((await shotShow(paths, 'film_t', 'seq01-shot01')).id).toBe('seq01-shot01');
   });
+  it('refuses an unlawful sequence id on create and update (ID law)', async () => {
+    await expect(shotCreate(paths, 'film_t', { ...goodShot, sequence: '../../x' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/invalid sequence id/) });
+    await shotCreate(paths, 'film_t', goodShot);
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { sequence: '../../x' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/invalid sequence id/) });
+    expect((await shotShow(paths, 'film_t', 'seq01-shot01')).sequence).toBe('seq01'); // not persisted
+  });
+  it('refuses a status outside the whitelist; a lawful status persists', async () => {
+    await shotCreate(paths, 'film_t', goodShot);
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { status: 'banana' as unknown as 'draft' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/invalid status "banana"/) });
+    const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { status: 'kept' });
+    expect(s.status).toBe('kept');
+    expect((await shotShow(paths, 'film_t', 'seq01-shot01')).status).toBe('kept');
+  });
 });

@@ -20,9 +20,16 @@ export interface ShotRecord {
 
 const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend (M3)
 
+// The M3 job/verdict state machine depends on this whitelist; anything else is a
+// doctrine breach, not a free-form field.
+const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
+
 function validate(input: {
-  geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number;
+  status?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number;
 }): void {
+  if (input.status !== undefined && !STATUSES.includes(input.status)) {
+    throw errValidation(`invalid status "${input.status}"`, 'use draft|rendering|kept|rejected');
+  }
   if (!input.geoBlock?.trim()) {
     throw errValidation('geo_block is required',
       'lock the scene first (sequence_lock_geo) and paste its block verbatim');
@@ -49,8 +56,9 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   camera: CameraBlock; audioBlock: AudioBlock; durationS: number;
 }): Promise<ShotRecord> {
   assertId(input.id, 'shot');
+  assertId(input.sequence, 'sequence'); // the ID law applies to sequence ids too
   await filmMetaOrThrow(paths, filmId);
-  validate(input);
+  validate({ ...input, status: 'draft' }); // shotCreate always starts at draft
   for (const ref of input.refs) await assetRefCheck(paths, filmId, ref);
   const geoLock = (await filmMetaOrThrow(paths, filmId)).sequences[input.sequence]?.geoLocked;
   if (geoLock && input.geoBlock !== geoLock) {
@@ -89,6 +97,7 @@ export async function shotUpdate(paths: StudioPaths, filmId: string, shotId: str
   const current = await shotShow(paths, filmId, shotId);
   const { id: _ignored, ...rest } = structuredClone(patch);
   const merged: ShotRecord = { ...structuredClone(current), ...rest };
+  assertId(merged.sequence, 'sequence'); // the ID law holds on the MERGED record — before the geo-lock check
   validate(merged);
   for (const ref of merged.refs) await assetRefCheck(paths, filmId, ref);
   const geoLock = (await filmMetaOrThrow(paths, filmId)).sequences[merged.sequence]?.geoLocked;

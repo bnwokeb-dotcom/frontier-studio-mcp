@@ -114,8 +114,70 @@ describe('MCP registry tools', () => {
     const updated = await rpc('shot_update', { shot_id: 'seq01-shot01', patch: { duration_s: 15, audio_block: { sfx: 'new wind' } } });
     expect(isError(updated)).toBe(false);
     const shown = JSON.stringify(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
-    expect(shown).toMatch(/durationS\\?"\s*: 15/); // \" escaped inside the stringified result
+    expect(shown).toMatch(/duration_s\\?"\s*: 15/); // \" escaped inside the stringified result
     expect(shown).toContain('new wind');
+  });
+
+  it('wire round trip: outputs are snake_case and echo back verbatim into shot_update', async () => {
+    await rpc('film_create', { film_id: 'film_x', title: 'X', logline: 'Y', budget_usd: 40, target_runtime_min: 90 });
+    const film = recordOf(await rpc('film_show', {}));
+    expect(Object.keys(film)).toEqual(expect.arrayContaining(['film_id', 'budget_usd', 'target_runtime_min']));
+    expect(film.film_id).toBe('film_x');
+
+    await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
+    await rpc('shot_create', {
+      id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      refs: [{ asset_id: 'loc_ice', role: 'location' }],
+      camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
+      audio_block: { dialogue: [{ voice_ref: 'char_mara', line: 'hold the line' }], sfx: 'wind', music: 'none' },
+      duration_s: 10,
+    });
+
+    const shown = recordOf(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
+    // every output key is snake_case — a client can echo them straight back
+    expect(Object.keys(shown).sort()).toEqual([
+      'audio_block', 'camera', 'duration_s', 'geo_block', 'id', 'refs', 'sequence', 'status', 'takes',
+    ]);
+    expect(shown.geo_block).toBe('ROOM: clearing.');
+    expect(shown.refs).toEqual([{ asset_id: 'loc_ice', role: 'location' }]);
+    expect(shown.audio_block).toEqual({
+      dialogue: [{ voice_ref: 'char_mara', line: 'hold the line' }], sfx: 'wind', music: 'none',
+    });
+
+    // echo the shot_show output values back verbatim under their wire key names
+    const updated = await rpc('shot_update', {
+      shot_id: 'seq01-shot01',
+      patch: {
+        sequence: shown.sequence,
+        geo_block: shown.geo_block,
+        refs: shown.refs,
+        camera: shown.camera,
+        audio_block: shown.audio_block,
+        duration_s: 15,
+      },
+    });
+    expect(isError(updated)).toBe(false);
+    const after = recordOf(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
+    expect(after.duration_s).toBe(15); // the new value persisted (echo patch is not a silent no-op)
+    expect(after.audio_block).toEqual(shown.audio_block); // echoed audio survived intact
+  });
+
+  it('shot_update refuses unknown patch keys loudly (never silently dropped)', async () => {
+    await rpc('film_create', { film_id: 'film_x', title: 'X', logline: 'Y' });
+    await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
+    await rpc('shot_create', {
+      id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      refs: [{ asset_id: 'loc_ice', role: 'location' }],
+      camera: { lens: '35mm', move: 'push-in', reason: 'because' },
+      duration_s: 10,
+    });
+    const res = await rpc('shot_update', { shot_id: 'seq01-shot01', patch: { foo: 1 } });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/unknown patch key \\?"foo\\?"/); // \" escaped inside the stringified result
+    // the old camelCase output keys must not sneak back in either
+    const camel = await rpc('shot_update', { shot_id: 'seq01-shot01', patch: { durationS: 15 } });
+    expect(isError(camel)).toBe(true);
+    expect(JSON.stringify(camel)).toMatch(/unknown patch key \\?"durationS\\?"/);
   });
 
   it('shot_update preserves audio_block keys absent from the patch (no silent data loss)', async () => {
@@ -147,5 +209,10 @@ describe('MCP registry tools', () => {
 
 function audioBlockOf(res: unknown): Record<string, unknown> {
   const text = (res as { content: { text: string }[] }).content[0].text;
-  return (JSON.parse(text) as { audioBlock: Record<string, unknown> }).audioBlock;
+  return (JSON.parse(text) as { audio_block: Record<string, unknown> }).audio_block;
+}
+
+function recordOf(res: unknown): Record<string, unknown> {
+  const text = (res as { content: { text: string }[] }).content[0].text;
+  return JSON.parse(text) as Record<string, unknown>;
 }

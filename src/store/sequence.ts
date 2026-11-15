@@ -1,9 +1,10 @@
 // src/store/sequence.ts
 import { errValidation } from '../errors.js';
-import { filmMetaOrThrow, patchFilmMeta } from './film.js';
+import { assertId, filmMetaOrThrow, patchFilmMeta } from './film.js';
 import type { StudioPaths } from './paths.js';
 
 export async function sequenceLockGeo(paths: StudioPaths, filmId: string, sequence: string, geoBlock: string): Promise<void> {
+  assertId(sequence, 'sequence'); // the ID law applies to sequence ids too — before anything else
   if (!geoBlock.trim()) {
     throw errValidation('geo_block text is empty', 'write the room map: landmarks, frame sides, camera side, 180° axis');
   }
