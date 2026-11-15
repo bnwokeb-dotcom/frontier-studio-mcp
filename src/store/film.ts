@@ -11,6 +11,7 @@ export interface FilmMeta {
   title: string;
   logline: string;
   budgetUsd?: number;
+  spentUsd?: number;
   targetRuntimeMin?: number;
   sequences: Record<string, SequenceLock>;
   universeLinks: string[];
