@@ -82,10 +82,20 @@ export async function shotShow(paths: StudioPaths, filmId: string, shotId: strin
 }
 
 export async function shotUpdate(paths: StudioPaths, filmId: string, shotId: string, patch: Partial<ShotRecord>): Promise<ShotRecord> {
+  if (patch.id !== undefined && patch.id !== shotId) {
+    throw errValidation(`shot id is immutable ("${shotId}")`,
+      'create a new shot with shot_create instead of renaming this one');
+  }
   const current = await shotShow(paths, filmId, shotId);
-  const merged: ShotRecord = { ...structuredClone(current), ...structuredClone(patch) };
+  const { id: _ignored, ...rest } = structuredClone(patch);
+  const merged: ShotRecord = { ...structuredClone(current), ...rest };
   validate(merged);
   for (const ref of merged.refs) await assetRefCheck(paths, filmId, ref);
+  const geoLock = (await filmMetaOrThrow(paths, filmId)).sequences[merged.sequence]?.geoLocked;
+  if (geoLock && merged.geoBlock !== geoLock) {
+    throw errValidation(`sequence "${merged.sequence}" has a locked geo block`,
+      'paste the locked block verbatim — characters teleport when the map changes between shots');
+  }
   await writeJsonAtomic(paths.shotPath(filmId, shotId), merged);
   return merged;
 }

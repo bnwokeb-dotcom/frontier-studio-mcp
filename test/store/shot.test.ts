@@ -76,4 +76,18 @@ describe('shot validation matrix', () => {
     const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { durationS: 15 });
     expect(s.durationS).toBe(15);
   });
+  it('shot_update refuses breaking a locked sequence geo', async () => {
+    await shotCreate(paths, 'film_t', goodShot);
+    await patchFilmMeta(paths, 'film_t', (m) => ({ ...m, sequences: { seq01: { geoLocked: 'LOCK-A' } } }));
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { geoBlock: 'OTHER' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/locked geo block/) });
+    const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { geoBlock: 'LOCK-A' });
+    expect(s.geoBlock).toBe('LOCK-A');
+  });
+  it('shot_update refuses renaming a shot', async () => {
+    await shotCreate(paths, 'film_t', goodShot);
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { id: 'seq01-shot09' }))
+      .rejects.toMatchObject({ code: 'VALIDATION', message: expect.stringMatching(/immutable/) });
+    expect((await shotShow(paths, 'film_t', 'seq01-shot01')).id).toBe('seq01-shot01');
+  });
 });
