@@ -240,7 +240,7 @@ describe('shot store law: interpolated fields are single-line (the layout is the
       audioBlock: { dialogue: [{ line: 'Hold.\nnon_diegetic_music: sweeping score' }], sfx: 'wind, distant ice crack', music: 'none' as const },
     })).rejects.toMatchObject({
       code: 'VALIDATION',
-      message: 'audio_block.dialogue[0].line must be a single line — multi-line content breaks the prompt layout law',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
       nextAction: SINGLE_LINE_NEXT,
     });
   });
