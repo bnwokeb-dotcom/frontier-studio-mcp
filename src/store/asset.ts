@@ -1,5 +1,6 @@
 // src/store/asset.ts
-import { copyFile, readFile } from 'node:fs/promises';
+import { copyFile, readFile, rename, rm } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { writeText, readText, ensureDir } from './fs.js';
 import { errValidation, errNotFound } from '../errors.js';
 import { assertId, filmMetaOrThrow } from './film.js';
@@ -104,7 +105,7 @@ export async function attachImage(
   if (name === 'sheet.png' && kindDir !== 'characters') {
     throw errValidation(
       'sheet.png is a characters image',
-      `asset "${assetId}" is a ${kindDir} asset — plate.png is the locations image`,
+      `asset "${assetId}" is a ${kindDir} asset — canonical images: sheet.png for characters · plate.png for locations and styles`,
     );
   }
   if (name === 'plate.png' && kindDir !== 'locations' && kindDir !== 'styles') {
@@ -117,9 +118,16 @@ export async function attachImage(
   const dir = paths.assetDir(filmId, kindDir, assetId);
   const dest = `${dir}/${name}`;
   await ensureDir(dir);
+  // tmp+rename (same dir, writeJsonAtomic's pattern): the swap onto dest is
+  // atomic, so a failed or half-finished copy can never leave the canonical
+  // name pointing at partial or mismatched bytes. The tmp copy is dropped on
+  // any failure so no debris lingers in the asset dir.
+  const tmp = `${dest}.tmp-${randomBytes(4).toString('hex')}`;
   try {
-    await copyFile(srcPath, dest);
+    await copyFile(srcPath, tmp);
+    await rename(tmp, dest);
   } catch (e) {
+    try { await rm(tmp, { force: true }); } catch { /* nothing to clean up */ }
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
       throw errNotFound(
         `image not found: ${srcPath}`,

@@ -3,13 +3,17 @@
 // The Gemini lane is constructed lazily, per call, ONLY here: registry tools
 // never touch it, so a missing GEMINI_API_KEY (AUTH) surfaces only when a
 // billed call actually executes. Binding order for every billed call:
-// validate args → resolve refs → lane.price → ensureBudget → submit → result
-// → write artifact → recordSpend → ledger line. Every refusal (validation,
-// NOT_FOUND, AUTH, BUDGET) precedes the API call by construction.
+// validate args → resolve refs → STUDIO_LIVE gate → lane.price → ensureBudget
+// → submit → result → write artifact → recordSpend → ledger line. Every
+// refusal (validation, NOT_FOUND, AUTH, BUDGET) precedes the API call by
+// construction; the STUDIO_LIVE gate precedes any lane construction at all.
 import { z } from 'zod';
+import { randomBytes } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, isAbsolute, join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { loadConfig } from '../config.js';
+import type { StudioConfig } from '../config.js';
 import { studioPaths } from '../store/paths.js';
 import type { StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
@@ -38,10 +42,31 @@ function slugOf(prompt: string): string {
   );
 }
 
-// <YYYYMMDD-HHmmss>, local time
+// <YYYYMMDD-HHmmss>-<hex4>, local time — the 4 random hex chars (drawn from
+// randomBytes(4), the same pattern as writeJsonAtomic's tmp suffix) make two
+// same-slug takes inside one second collision-proof: the loser's ledger line
+// must never point at the winner's bytes.
 function stampOf(d: Date): string {
   const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+  const hex4 = randomBytes(4).toString('hex').slice(0, 4);
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}-${hex4}`;
+}
+
+// The STUDIO_LIVE switch, enforced (README row: `1` = real lanes, `0` =
+// registry only): every billed tool loads the config and refuses BEFORE any
+// lane is constructed unless the studio is live. STUDIO_ROOT is passed through
+// so the load works even when the env var itself isn't set (buildServer owns
+// the root); GEMINI_API_KEY still rides from the environment. The free
+// asset_image tool never calls this.
+function liveLaneConfig(studioRoot: string): StudioConfig {
+  const cfg = loadConfig({ ...process.env, STUDIO_ROOT: studioRoot });
+  if (!cfg.studioLive) {
+    throw errValidation(
+      'real generation lanes are disabled (STUDIO_LIVE=0)',
+      'set STUDIO_LIVE=1 to enable billed calls',
+    );
+  }
+  return cfg;
 }
 
 // Absolute paths pass through as-is; relative paths resolve against STUDIO_ROOT
@@ -132,12 +157,9 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
       refImages.push(await readRefImage(paths, studioRoot, filmId, raw));
     }
 
-    // 4. lane + quote (lazily, per call)
-    const lane = GeminiLane.fromConfig({
-      studioRoot,
-      geminiApiKey: process.env.GEMINI_API_KEY || undefined,
-      studioLive: process.env.STUDIO_LIVE === '1',
-    });
+    // 4. STUDIO_LIVE gate + lane + quote (lazily, per call) — the gate fires
+    // before the lane exists, so STUDIO_LIVE=0 can never reach a billed call
+    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = {
       prompt: a.prompt,
       refImages,
@@ -223,12 +245,9 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     // 4. compose the sheet law (pure; VALIDATION on a whitespace-only descriptor)
     const prompt = characterSheetPrompt(descriptor);
 
-    // 5. lane + quote (lazily, per call) — sheets are 1K, 16:9 by law
-    const lane = GeminiLane.fromConfig({
-      studioRoot,
-      geminiApiKey: process.env.GEMINI_API_KEY || undefined,
-      studioLive: process.env.STUDIO_LIVE === '1',
-    });
+    // 5. STUDIO_LIVE gate + lane + quote (lazily, per call) — sheets are 1K,
+    // 16:9 by law; the gate fires before the lane exists
+    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
     const price = lane.price(req);
 
@@ -310,7 +329,12 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
         kindDir === 'characters'
           ? 'keyframes are for locations/styles — characters get character_sheet_build'
           : `keyframes are for locations/styles — ${kindDir} assets don't take keyframes`,
-        `pass a location or style asset_id, or sheet "${a.asset_id}" with character_sheet_build`,
+        // Truthful NEXT per branch: characters keep the sheet tool; a prop must
+        // never be told to sheet itself (character_sheet_build would refuse it
+        // again) — it takes no keyframe at all.
+        kindDir === 'characters'
+          ? `pass a location or style asset_id, or sheet "${a.asset_id}" with character_sheet_build`
+          : 'props take no keyframe — register it as a location or style, or keyframe_build a location',
       );
     }
     const assetDir = paths.assetDir(filmId, kindDir, a.asset_id);
@@ -327,12 +351,9 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     // 5. compose the light law (pure; VALIDATION on a whitespace-only light_statement)
     const prompt = keyframePrompt({ descriptor, geoBlock, lightStatement: a.light_statement });
 
-    // 6. lane + quote (lazily, per call) — keyframes are 1K, 16:9 by law
-    const lane = GeminiLane.fromConfig({
-      studioRoot,
-      geminiApiKey: process.env.GEMINI_API_KEY || undefined,
-      studioLive: process.env.STUDIO_LIVE === '1',
-    });
+    // 6. STUDIO_LIVE gate + lane + quote (lazily, per call) — keyframes are
+    // 1K, 16:9 by law; the gate fires before the lane exists
+    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
     const price = lane.price(req);
 
@@ -409,11 +430,11 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     }
     const name = a.name
       ?? (kindDir === 'characters' ? 'sheet.png' : undefined)
-      ?? (kindDir === 'locations' ? 'plate.png' : undefined);
+      ?? (kindDir === 'locations' || kindDir === 'styles' ? 'plate.png' : undefined);
     if (!name) {
       throw errValidation(
-        `${kindDir} assets have no canonical image (sheet.png is characters, plate.png is locations)`,
-        'register the asset as a character or location to carry a canonical image',
+        `${kindDir} assets have no canonical image (sheet.png is characters · plate.png is locations and styles)`,
+        'register the asset as a character, location, or style to carry a canonical image',
       );
     }
 

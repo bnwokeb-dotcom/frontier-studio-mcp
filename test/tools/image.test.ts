@@ -1,6 +1,8 @@
 // test/tools/image.test.ts — image_generate: billed, budgeted, ledgered.
 // Fixture-injected: GeminiLane's FetchLike defaults to the global fetch, so the
 // tests stub global fetch with the recorded fixture body (no network, no creds).
+// Billed happy paths run with STUDIO_LIVE=1 (stubbed below); the gate describe
+// pins the registry-only refusal when the switch is off.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, mkdir, rm, readFile, readdir, writeFile } from 'node:fs/promises';
@@ -41,6 +43,7 @@ beforeEach(async () => {
   root = await mkdtemp(join(tmpdir(), 'fsm-image-'));
   calls = [];
   vi.stubEnv('GEMINI_API_KEY', 'test-key');
+  vi.stubEnv('STUDIO_LIVE', '1'); // billed happy paths are live; gate tests re-stub to '0'/'' 
   vi.stubGlobal('fetch', fetchOk);
   server = buildServer({ studioRoot: root });
   // R-client-order: construct the client BEFORE connecting either end.
@@ -104,7 +107,8 @@ describe('image_generate happy path (fixture fetch)', () => {
     expect(o.aspect_ratio).toBe('16:9'); // default
 
     // artifact exists on disk with the fixture base64 decoded: 'aGVsbG8=' → 104 101 108 108 111
-    expect(String(o.artifact_path)).toMatch(/films\/film_x\/generated\/\d{8}-\d{6}-a-lone-lighthouse-at-dusk-35mm\.png$/);
+    // name law: <YYYYMMDD-HHmmss>-<hex4>-<slug>.png — the 4 hex chars break same-second collisions
+    expect(String(o.artifact_path)).toMatch(/films\/film_x\/generated\/\d{8}-\d{6}-[0-9a-f]{4}-a-lone-lighthouse-at-dusk-35mm\.png$/);
     const bytes = await readFile(String(o.artifact_path));
     expect(Array.from(bytes)).toEqual([104, 101, 108, 108, 111]);
 
@@ -149,6 +153,30 @@ describe('image_generate happy path (fixture fetch)', () => {
       mime_type: 'image/jpeg',
       data: Buffer.from('jpgbytes').toString('base64'),
     });
+  });
+
+  it('two rapid same-slug takes → two distinct living files, two ledger lines (hex4 breaks the second-resolution tie)', async () => {
+    await seedFilm('film_x', 1); // two takes = 0.268 < 1
+    const prompt = 'A lone lighthouse at dusk, 35mm';
+
+    const r1 = await rpc('image_generate', { prompt });
+    const r2 = await rpc('image_generate', { prompt });
+    expect(isError(r1)).toBe(false);
+    expect(isError(r2)).toBe(false);
+
+    const a1 = String(recordOf(r1).artifact_path);
+    const a2 = String(recordOf(r2).artifact_path);
+    expect(a1).toMatch(/generated\/\d{8}-\d{6}-[0-9a-f]{4}-a-lone-lighthouse-at-dusk-35mm\.png$/);
+    expect(a2).toMatch(/generated\/\d{8}-\d{6}-[0-9a-f]{4}-a-lone-lighthouse-at-dusk-35mm\.png$/);
+    expect(a1).not.toBe(a2); // no silent overwrite, even inside the same second
+
+    // each ledger line points at its own artifact, and both files hold their own bytes
+    const lines = await ledgerLines('film_x');
+    expect(lines).toHaveLength(2);
+    expect(lines[0].artifact_path).toBe(a1);
+    expect(lines[1].artifact_path).toBe(a2);
+    expect(Array.from(await readFile(a1))).toEqual([104, 101, 108, 108, 111]);
+    expect(Array.from(await readFile(a2))).toEqual([104, 101, 108, 108, 111]);
   });
 });
 
@@ -252,6 +280,54 @@ describe('image_generate refusals (each precedes any API call where billed)', ()
     expect(JSON.stringify(res)).toMatch(/unsupported reference image type \\?"\.tiff\\?"/); // \" escaped inside the stringified result
     expect(JSON.stringify(res)).toMatch(/\.png, \.jpg, \.jpeg or \.webp/);
     expect(calls).toHaveLength(0);
+  });
+});
+
+// --- STUDIO_LIVE gate: the switch is live, not decorative ---------------------
+
+describe('STUDIO_LIVE gate (README row: 1 = real lanes, 0 = registry only)', () => {
+  it('STUDIO_LIVE=0 → image_generate refuses before any fetch; nothing written or ledged; asset_image stays free', async () => {
+    vi.stubEnv('STUDIO_LIVE', '0');
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/real generation lanes are disabled \(STUDIO_LIVE=0\)/);
+    expect(JSON.stringify(res)).toMatch(/set STUDIO_LIVE=1 to enable billed calls/);
+    expect(calls).toHaveLength(0);
+    await expect(readFile(join(root, 'films', 'film_x', 'ledger.jsonl'), 'utf8'))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+
+    // the free tool is unaffected by the gate
+    await rpc('asset_register', { kind: 'character', asset_id: 'mara', descriptor: DESCRIPTOR, voice: 'low', acting: 'still' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'hand-drawn.png'), 'sheetbytes');
+    const free = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/hand-drawn.png' });
+    expect(isError(free)).toBe(false);
+    expect(String(recordOf(free).asset_path)).toMatch(/sheet\.png$/);
+  });
+
+  it('STUDIO_LIVE absent → same refusal (config default is registry-only)', async () => {
+    vi.stubEnv('STUDIO_LIVE', '');
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/real generation lanes are disabled \(STUDIO_LIVE=0\)/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('STUDIO_LIVE=1 → the billed happy path proceeds (fixture fetch)', async () => {
+    vi.stubEnv('STUDIO_LIVE', '1');
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('image_generate', { prompt: 'x' });
+    expect(isError(res)).toBe(false);
+    expect(calls).toHaveLength(1);
+    expect(await ledgerLines('film_x')).toHaveLength(1);
   });
 });
 
@@ -402,6 +478,44 @@ describe('asset_image (free tool: no lane, no budget, no ledger)', () => {
     expect(await readFile(join(root, 'films', 'film_x', 'assets', 'locations', 'docks', 'plate.png'), 'utf8')).toBe('platebytes');
   });
 
+  it('defaults the name to plate.png for styles too (extended name law)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'style', asset_id: 'noir', descriptor: 'High-contrast 1940s studio noir, hard key, deep blacks' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'grade.png'), 'stylebytes');
+
+    const res = await rpc('asset_image', { asset_id: 'noir', image_path: 'refs/grade.png' });
+    expect(isError(res)).toBe(false);
+    expect(String(recordOf(res).asset_path)).toMatch(/assets\/styles\/noir\/plate\.png$/);
+    expect(await readFile(join(root, 'films', 'film_x', 'assets', 'styles', 'noir', 'plate.png'), 'utf8')).toBe('stylebytes');
+  });
+
+  it('prop asset → VALIDATION naming the styles-aware canonical-image doctrine', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'prop', asset_id: 'lantern', descriptor: 'Brass ship lantern, soot-blackened glass' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'l.png'), 'bytes');
+
+    const res = await rpc('asset_image', { asset_id: 'lantern', image_path: 'refs/l.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/props assets have no canonical image \(sheet\.png is characters · plate\.png is locations and styles\)/);
+    expect(JSON.stringify(res)).toMatch(/register the asset as a character, location, or style to carry a canonical image/);
+  });
+
+  it('sheet.png on a location asset → VALIDATION; NEXT names the canonical-image law', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x');
+    await rpc('asset_register', { kind: 'location', asset_id: 'docks', descriptor: 'Rain-slicked fishing docks' });
+    await mkdir(join(root, 'films', 'film_x', 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', 'film_x', 'refs', 'd.png'), 'bytes');
+
+    const res = await rpc('asset_image', { asset_id: 'docks', image_path: 'refs/d.png', name: 'sheet.png' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/canonical images: sheet\.png for characters · plate\.png for locations and styles/);
+  });
+
   it('unknown asset → NOT_FOUND', async () => {
     vi.stubGlobal('fetch', fetchNever);
     await seedFilm('film_x');
@@ -544,25 +658,29 @@ describe('keyframe_build (fixture fetch)', () => {
 });
 
 describe('keyframe_build refusals (each precedes any API call)', () => {
-  it('character asset → VALIDATION naming the alternative tool', async () => {
+  it('character asset → VALIDATION; full refusal pinned (NEXT keeps character_sheet_build)', async () => {
     vi.stubGlobal('fetch', fetchNever);
     await seedCharacter('film_x', 'mara');
 
     const res = await rpc('keyframe_build', { asset_id: 'mara', light_statement: LIGHT_STATEMENT });
     expect(isError(res)).toBe(true);
-    expect(JSON.stringify(res)).toMatch(/keyframes are for locations\/styles — characters get character_sheet_build/);
+    expect(JSON.stringify(res)).toMatch(
+      /keyframes are for locations\/styles — characters get character_sheet_build — NEXT: pass a location or style asset_id, or sheet \\?"mara\\?" with character_sheet_build/,
+    );
     expect(calls).toHaveLength(0);
     expect((await filmJson('film_x')).spentUsd).toBeUndefined();
   });
 
-  it('prop asset → VALIDATION (locations and styles only)', async () => {
+  it('prop asset → VALIDATION; full refusal pinned (truthful NEXT — no character_sheet_build dead end)', async () => {
     vi.stubGlobal('fetch', fetchNever);
     await seedFilm('film_x', 1);
     await rpc('asset_register', { kind: 'prop', asset_id: 'lantern', descriptor: 'Brass ship lantern, soot-blackened glass' });
 
     const res = await rpc('keyframe_build', { asset_id: 'lantern', light_statement: LIGHT_STATEMENT });
     expect(isError(res)).toBe(true);
-    expect(JSON.stringify(res)).toMatch(/keyframes are for locations\/styles/);
+    expect(JSON.stringify(res)).toMatch(
+      /keyframes are for locations\/styles — props assets don't take keyframes — NEXT: props take no keyframe — register it as a location or style, or keyframe_build a location/,
+    );
     expect(calls).toHaveLength(0);
   });
 
