@@ -13,14 +13,26 @@ import { attachImage } from '../src/store/asset.js';
 import { writeText } from '../src/store/fs.js';
 
 const cfg = loadConfig();
-if (!cfg.geminiApiKey) { console.error('GEMINI_API_KEY not set — get one at https://aistudio.google.com/apikey'); process.exit(1); }
 if (!cfg.studioLive) { console.error('STUDIO_LIVE=1 required (the real-lanes switch)'); process.exit(1); }
 const paths = studioPaths(cfg.studioRoot);
-const filmId = (await import('../src/store/studio.js')).getActiveFilm ? undefined : undefined;
 const meta = await filmShow(paths, 'film_last_deal');
 console.log(`film: ${meta.title} — budget $${meta.budgetUsd}, spent $${meta.spentUsd ?? 0}`);
 
-const lane = GeminiLane.fromConfig(cfg);
+// Auth: API key when set; otherwise Google Cloud ADC (org policies that disallow keys).
+const { existsSync } = await import('node:fs');
+const adcPath = process.env.GOOGLE_APPLICATION_CREDENTIALS
+  ?? `${process.env.APPDATA}/gcloud/application_default_credentials.json`;
+let lane;
+if (cfg.geminiApiKey) {
+  lane = GeminiLane.fromConfig(cfg);
+  console.log('auth: GEMINI_API_KEY');
+} else if (existsSync(adcPath)) {
+  lane = await GeminiLane.fromAdc(adcPath);
+  console.log(`auth: ADC (${adcPath})`);
+} else {
+  console.error('No credentials: set GEMINI_API_KEY, or run gcloud auth application-default login');
+  process.exit(1);
+}
 const sheet = async (assetId, kindDir) => {
   const dir = `${cfg.studioRoot}/films/film_last_deal/assets/${kindDir}/${assetId}`;
   const descriptor = await readText(`${dir}/descriptor.md`);
