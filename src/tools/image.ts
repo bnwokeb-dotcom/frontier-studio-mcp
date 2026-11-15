@@ -18,7 +18,7 @@ import { attachImage, findAssetKindDir } from '../store/asset.js';
 import { ensureBudget, recordSpend } from '../budget.js';
 import { GeminiLane } from '../lanes/gemini.js';
 import { errNotFound, errValidation } from '../errors.js';
-import { characterSheetPrompt } from './prompts.js';
+import { characterSheetPrompt, keyframePrompt } from './prompts.js';
 import { guard, out } from './registry.js';
 
 const MAX_REFS = 14;
@@ -276,6 +276,110 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     });
   }));
 
+  // The keyframe light law, billed: descriptor.md (+ geo_block.md when the asset
+  // has one) → keyframe prompt → 1K/16:9 → budget → lane → attach as the asset's
+  // canonical plate.png. Locations and styles only — a character keyframe is a
+  // category error (characters get character_sheet_build). Same binding order as
+  // image_generate / character_sheet_build.
+  server.tool('keyframe_build', {
+    asset_id: z.string(),
+    light_statement: z.string(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    // 1. validate args
+    if (!a.asset_id.trim()) {
+      throw errValidation('asset_id is required', 'pass the location or style asset_id to keyframe');
+    }
+
+    // 2. film: explicit id or the active one
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+
+    // 3. resolve the asset BEFORE the quote — no refusal may follow the budget
+    // check. Explicit kind probe (findAssetKindDir): unregistered → NOT_FOUND;
+    // a character/prop id → VALIDATION naming what keyframes are for.
+    const kindDir = await findAssetKindDir(paths, filmId, a.asset_id);
+    if (!kindDir) {
+      throw errNotFound(
+        `asset "${a.asset_id}" is not registered`,
+        'register it with asset_register before keyframing it',
+      );
+    }
+    if (kindDir !== 'locations' && kindDir !== 'styles') {
+      throw errValidation(
+        kindDir === 'characters'
+          ? 'keyframes are for locations/styles — characters get character_sheet_build'
+          : `keyframes are for locations/styles — ${kindDir} assets don't take keyframes`,
+        `pass a location or style asset_id, or sheet "${a.asset_id}" with character_sheet_build`,
+      );
+    }
+    const assetDir = paths.assetDir(filmId, kindDir, a.asset_id);
+    const descriptor = await readText(`${assetDir}/descriptor.md`);
+
+    // 4. the spatial map: geo_block.md when the asset dir has one, loaded verbatim
+    let geoBlock: string | undefined;
+    try {
+      geoBlock = await readFile(`${assetDir}/geo_block.md`, 'utf8');
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+    }
+
+    // 5. compose the light law (pure; VALIDATION on a whitespace-only light_statement)
+    const prompt = keyframePrompt({ descriptor, geoBlock, lightStatement: a.light_statement });
+
+    // 6. lane + quote (lazily, per call) — keyframes are 1K, 16:9 by law
+    const lane = GeminiLane.fromConfig({
+      studioRoot,
+      geminiApiKey: process.env.GEMINI_API_KEY || undefined,
+      studioLive: process.env.STUDIO_LIVE === '1',
+    });
+    const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
+    const price = lane.price(req);
+
+    // 7. hard stop BEFORE the API call
+    await ensureBudget(paths, filmId, price);
+
+    // 8. generate (synchronous: submit caches the body, result reads it back)
+    const interaction = await lane.submit(req);
+    const artifact = await lane.result(interaction);
+
+    // 9. attach as the canonical plate.png via attachImage (locations AND styles
+    // under the extended name law). The lane bytes are staged under the standard
+    // generated/ naming, copied, then the staging copy is dropped (best-effort) —
+    // the asset dir keeps the only copy.
+    const generatedDir = `${paths.filmDir(filmId)}/generated`;
+    const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
+    await ensureDir(generatedDir);
+    await writeFile(stagedPath, artifact.data);
+    const platePath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'plate.png');
+    try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
+
+    // 10. the multi-turn seed for this asset's future generations — ONLY the id
+    await writeText(`${assetDir}/interaction.md`, artifact.interactionId);
+
+    // 11. spend accrues ONLY after a successful artifact
+    await recordSpend(paths, filmId, artifact.priceUsd);
+
+    // 12. ledger line (Task 3 shape; the durable artifact is the attached plate)
+    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: 'keyframe_build',
+      lane: 'gemini',
+      film_id: filmId,
+      cost_usd: artifact.priceUsd,
+      verdict: 'pending',
+      interaction_id: artifact.interactionId,
+      artifact_path: platePath,
+    }));
+
+    // 13. snake_case wire output
+    return out({
+      plate_path: platePath,
+      interaction_id: artifact.interactionId,
+      cost_usd: artifact.priceUsd,
+    });
+  }));
+
   // Free tool: a straight byte copy into an asset dir — no lane, no budget, no
   // ledger. Name defaults to the asset kind's canonical image; an explicit name
   // goes through the same attachImage validation.
@@ -300,7 +404,7 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     if (!kindDir) {
       throw errNotFound(
         `asset "${a.asset_id}" is not registered`,
-        'register it with asset_register (characters take sheet.png, locations take plate.png)',
+        'register it with asset_register (characters take sheet.png, locations and styles take plate.png)',
       );
     }
     const name = a.name

@@ -26,3 +26,31 @@ export function characterSheetPrompt(descriptor: string): string {
     'Clothing identical across panels. No props except what the descriptor states. No background scenery — the grey studio backdrop only. No text, no labels, no watermarks.',
   ].join('\n');
 }
+
+// The keyframe light law: ONE motivated light source, one direction of shadows,
+// a 3/4 composition — the frame a whole sequence gets staged against. Descriptor,
+// light statement and geo block all interpolate verbatim: doctrine travels
+// exactly as registered, never paraphrased. The law text is BINDING (M2 plan)
+// and pinned byte-for-byte by a test.
+export interface KeyframePromptInput {
+  descriptor: string;
+  lightStatement: string;
+  geoBlock?: string;
+}
+
+export function keyframePrompt({ descriptor, lightStatement, geoBlock }: KeyframePromptInput): string {
+  if (!lightStatement.trim()) {
+    throw errValidation(
+      'light_statement is required',
+      'state the light source: what it is, where it comes from, what color',
+    );
+  }
+  return [
+    'Cinematic keyframe for AI film production. One frame, 16:9, photographic realism, film grain, motivated lighting only.',
+    `Location: ${descriptor}`,
+    `Light: ${lightStatement}  — one source, one direction of shadows; never two suns.`,
+    'Composition: 3/4 view of the space (never flat frontal), one visual anchor stated by name in the scene, depth readable from foreground to background.',
+    ...(geoBlock ? [`spatial map the staging must respect, verbatim: ${geoBlock}`] : []),
+    'No text, no watermarks, no people unless the descriptor names them.',
+  ].join('\n');
+}

@@ -442,6 +442,149 @@ describe('asset_image (free tool: no lane, no budget, no ledger)', () => {
 
     const res = await rpc('asset_image', { asset_id: 'mara', image_path: 'refs/plate.png', name: 'plate.png' });
     expect(isError(res)).toBe(true);
-    expect(JSON.stringify(res)).toMatch(/plate\.png is a locations image/);
+    expect(JSON.stringify(res)).toMatch(/plate\.png is a locations or styles image/); // Task 5 ruling: plate.png ↔ locations OR styles
+  });
+});
+
+// --- Task 5: keyframe_build (the light law) -----------------------------------
+
+const LOCATION_DESCRIPTOR = 'A rain-slicked fishing dock at low tide, diesel sheen on black water';
+const LIGHT_STATEMENT = 'single sodium flood on a pole behind camera left, amber, hard';
+const GEO_BLOCK = 'dock runs east-west; winch house at the west end; the tide gate is the only way onto the water';
+
+async function seedLocation(
+  filmId = 'film_x',
+  assetId = 'docks',
+  opts?: { budgetUsd?: number; geoBlock?: string },
+) {
+  await seedFilm(filmId, opts?.budgetUsd ?? 1);
+  await rpc('asset_register', {
+    kind: 'location', asset_id: assetId, descriptor: LOCATION_DESCRIPTOR,
+    ...(opts?.geoBlock !== undefined ? { geo_block: opts.geoBlock } : {}),
+  });
+}
+
+describe('keyframe_build (fixture fetch)', () => {
+  it('composes the light law with the geo block, attaches plate.png, seeds interaction.md, ledgers, accrues spend', async () => {
+    await seedLocation('film_x', 'docks', { geoBlock: GEO_BLOCK });
+
+    const res = await rpc('keyframe_build', { asset_id: 'docks', light_statement: LIGHT_STATEMENT });
+    expect(isError(res)).toBe(false);
+
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual(['cost_usd', 'interaction_id', 'plate_path']);
+    expect(o.interaction_id).toBe('int-fixture-output-image');
+    expect(o.cost_usd).toBe(0.134);
+    expect(String(o.plate_path)).toMatch(/films\/film_x\/assets\/locations\/docks\/plate\.png$/);
+
+    // plate.png holds the fixture image bytes ('aGVsbG8=' decoded)
+    expect(Array.from(await readFile(String(o.plate_path)))).toEqual([104, 101, 108, 108, 111]);
+
+    // interaction.md contains ONLY the interaction id — byte-exact, no newline
+    expect(await readFile(join(root, 'films', 'film_x', 'assets', 'locations', 'docks', 'interaction.md'), 'utf8'))
+      .toBe('int-fixture-output-image');
+
+    // exactly one API call, carrying the light law at the 1K/16:9 defaults;
+    // descriptor, light statement and geo block all ride verbatim
+    expect(calls).toHaveLength(1);
+    const body = JSON.parse(calls[0].body as string);
+    expect(body.input).toHaveLength(1); // no ref images
+    expect(body.input[0].type).toBe('text');
+    const sent = body.input[0].text as string;
+    expect(sent).toContain(LOCATION_DESCRIPTOR);
+    expect(sent).toContain(LIGHT_STATEMENT);
+    expect(sent).toContain(GEO_BLOCK);
+    expect(sent).toContain('never two suns');
+    expect(sent).toContain('3/4 view');
+    expect(sent).toContain('motivated lighting only');
+    expect(body.response_format).toEqual({
+      type: 'image', mime_type: 'image/png', aspect_ratio: '16:9', image_size: '1K',
+    });
+
+    // the staging copy is gone after the attach — the asset dir keeps the only bytes
+    expect(await readdir(join(root, 'films', 'film_x', 'generated'))).toEqual([]);
+
+    // one ledger line, Task 3 shape, artifact = the attached plate
+    const lines = await ledgerLines('film_x');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toEqual({
+      ts: expect.any(String),
+      tool: 'keyframe_build',
+      lane: 'gemini',
+      film_id: 'film_x',
+      cost_usd: 0.134,
+      verdict: 'pending',
+      interaction_id: 'int-fixture-output-image',
+      artifact_path: String(o.plate_path),
+    });
+
+    // spend accrued on the film
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.134, 12);
+  });
+
+  it('style asset → plate.png attaches under the extended name law; no geo_block.md → no spatial-map line', async () => {
+    await seedFilm('film_x', 1);
+    await rpc('asset_register', {
+      kind: 'style', asset_id: 'noir', descriptor: 'High-contrast 1940s studio noir, hard key, deep blacks',
+    });
+
+    const res = await rpc('keyframe_build', {
+      asset_id: 'noir', light_statement: 'one bare bulb overhead, warm white, a single hard source',
+    });
+    expect(isError(res)).toBe(false);
+    const o = recordOf(res);
+    expect(String(o.plate_path)).toMatch(/films\/film_x\/assets\/styles\/noir\/plate\.png$/);
+    expect(Array.from(await readFile(String(o.plate_path)))).toEqual([104, 101, 108, 108, 111]);
+
+    const sent = JSON.parse(calls[0].body as string).input[0].text as string;
+    expect(sent).toContain('High-contrast 1940s studio noir, hard key, deep blacks');
+    expect(sent).toContain('never two suns');
+    expect(sent).not.toContain('spatial map');
+  });
+});
+
+describe('keyframe_build refusals (each precedes any API call)', () => {
+  it('character asset → VALIDATION naming the alternative tool', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedCharacter('film_x', 'mara');
+
+    const res = await rpc('keyframe_build', { asset_id: 'mara', light_statement: LIGHT_STATEMENT });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/keyframes are for locations\/styles — characters get character_sheet_build/);
+    expect(calls).toHaveLength(0);
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+  });
+
+  it('prop asset → VALIDATION (locations and styles only)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+    await rpc('asset_register', { kind: 'prop', asset_id: 'lantern', descriptor: 'Brass ship lantern, soot-blackened glass' });
+
+    const res = await rpc('keyframe_build', { asset_id: 'lantern', light_statement: LIGHT_STATEMENT });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/keyframes are for locations\/styles/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('unregistered asset → NOT_FOUND before any fetch', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedFilm('film_x', 1);
+
+    const res = await rpc('keyframe_build', { asset_id: 'ghost', light_statement: LIGHT_STATEMENT });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/asset \\?"ghost\\?" is not registered/); // \" escaped inside the stringified result
+    expect(calls).toHaveLength(0);
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+  });
+
+  it('over-budget → BUDGET before any fetch (tripwire)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedLocation('film_x', 'docks', { budgetUsd: 0.1 });
+
+    const res = await rpc('keyframe_build', { asset_id: 'docks', light_statement: LIGHT_STATEMENT });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/budget exceeded: 0 spent \+ 0\.134 quote > 0\.1 cap/);
+    expect(calls).toHaveLength(0);
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
   });
 });

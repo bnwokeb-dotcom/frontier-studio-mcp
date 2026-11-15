@@ -80,9 +80,10 @@ export async function findAssetKindDir(paths: StudioPaths, filmId: string, asset
   return undefined;
 }
 
-// Canonical asset images only: a character's sheet, a location's plate. The
+// Canonical asset images only: a character's sheet, a location's or style's
+// plate (styles keyframe to plate.png via keyframe_build — Task 5 ruling). The
 // name↔kind pairing is the law — sheet.png is a character file, plate.png a
-// location file — so a plate can never masquerade as a sheet.
+// location/style file — so a plate can never masquerade as a sheet.
 const ASSET_IMAGE_NAME = /^sheet\.png$|^plate\.png$/;
 
 export async function attachImage(
@@ -106,10 +107,10 @@ export async function attachImage(
       `asset "${assetId}" is a ${kindDir} asset — plate.png is the locations image`,
     );
   }
-  if (name === 'plate.png' && kindDir !== 'locations') {
+  if (name === 'plate.png' && kindDir !== 'locations' && kindDir !== 'styles') {
     throw errValidation(
-      'plate.png is a locations image',
-      `asset "${assetId}" is a ${kindDir} asset — sheet.png is the characters image`,
+      'plate.png is a locations or styles image',
+      `asset "${assetId}" is a ${kindDir} asset — plate.png attaches to locations or styles, sheet.png to characters`,
     );
   }
   await assertAssetExists(paths, filmId, kindDir, assetId);
