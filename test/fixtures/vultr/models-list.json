@@ -1,0 +1,6 @@
+{
+  "models": [
+    { "id": "minimax-h3", "name": "MiniMax H3" },
+    { "id": "minimax-h2", "name": "MiniMax H2 (legacy)" }
+  ]
+}

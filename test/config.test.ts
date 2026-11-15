@@ -4,11 +4,16 @@ import { StudioError } from '../src/errors.js';
 
 describe('loadConfig', () => {
   it('loads studioRoot and flags from env', () => {
-    const cfg = loadConfig({ STUDIO_ROOT: 'C:/tmp/studio', GEMINI_API_KEY: 'k1', STUDIO_LIVE: '1' });
+    const cfg = loadConfig({
+      STUDIO_ROOT: 'C:/tmp/studio',
+      GEMINI_API_KEY: 'k1',
+      VULTR_INFERENCE_API_KEY: 'vk1',
+      STUDIO_LIVE: '1',
+    });
     expect(cfg.studioRoot).toBe('C:/tmp/studio');
     expect(cfg.geminiApiKey).toBe('k1');
+    expect(cfg.vultrApiKey).toBe('vk1');
     expect(cfg.studioLive).toBe(true);
-    expect(cfg.vultrApiKey).toBeUndefined();
   });
   it('refuses to start without STUDIO_ROOT, naming the fix', () => {
     expect(() => loadConfig({})).toThrow(StudioError);

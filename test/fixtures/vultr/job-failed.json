@@ -1,0 +1,7 @@
+{
+  "id": "vid-fixture-0001",
+  "status": "failed",
+  "progress": 30,
+  "error": "content policy violation: prompt rejected by the safety filter",
+  "error_code": "content_policy_violation"
+}

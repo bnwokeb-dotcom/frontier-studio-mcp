@@ -1,0 +1,16 @@
+{
+  "id": "vid-fixture-0001",
+  "status": "completed",
+  "progress": 100,
+  "expires_at": "2026-11-22T12:00:00Z",
+  "usage": {
+    "cost": 1.36
+  },
+  "output": {
+    "duration": 8.0,
+    "width": 1366,
+    "height": 768,
+    "has_audio": true,
+    "format": "mp4"
+  }
+}

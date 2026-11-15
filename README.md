@@ -18,7 +18,7 @@ Requires Node >= 20.
 | --------------- | -------- | -------------------------------------------------------------- |
 | `STUDIO_ROOT`   | yes      | Absolute path to the studio workspace folder (created on demand) |
 | `GEMINI_API_KEY` | no      | Gemini image lane — required only for the billed image tools    |
-| `VULTR_API_KEY`  | no      | Reserved for the M3 video lane                                  |
+| `VULTR_INFERENCE_API_KEY` | no | Vultr video lane (M3) — required only for the billed video tools |
 | `STUDIO_LIVE`   | no       | `1` = real generation lanes enabled; `0` = registry only         |
 
 No credentials are required for the M1 registry core or the free M2 tools; only `STUDIO_ROOT` matters there. The billed image tools refuse with a structured `AUTH` error until `GEMINI_API_KEY` is set.

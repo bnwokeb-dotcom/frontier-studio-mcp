@@ -15,7 +15,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return {
     studioRoot,
     geminiApiKey: env.GEMINI_API_KEY || undefined,
-    vultrApiKey: env.VULTR_API_KEY || undefined,
+    vultrApiKey: env.VULTR_INFERENCE_API_KEY || undefined,
     studioLive: env.STUDIO_LIVE === '1',
   };
 }
