@@ -745,7 +745,7 @@ describe('job_download', () => {
     ]);
   });
 
-  it('job_download on a failed job → VALIDATION with the refund-aware NEXT (polling cannot complete it)', async () => {
+  it('job_download on a failed job → VALIDATION pointing at job_status to release the reserve', async () => {
     await seedShot();
     expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // reserve 1.224
 
@@ -754,18 +754,58 @@ describe('job_download', () => {
       [`GET ${jobUrl('vid-fixture-0001')}`]: [{ body: failedBody }, { body: failedBody }],
     }));
 
-    // the failed poll refunds the reserve, so the NEXT text is truthful in-scenario
+    // the failed poll runs the refund law (which lives ONLY in job_status —
+    // job_download's NEXT points at it, it does not refund)
     expect(isError(await rpc('job_status', { job_id: 'vid-fixture-0001' }))).toBe(false);
     expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0, 12);
 
     const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
     expect(isError(res)).toBe(true);
     expect(JSON.stringify(res)).toMatch(/job is failed, not completed/);
-    expect(JSON.stringify(res)).toMatch(/failed jobs bill \$0 — the estimate was refunded; re-render via repair_shot/);
+    expect(JSON.stringify(res))
+      .toMatch(/failed jobs bill \$0 — poll job_status to release the reserved estimate; re-render via repair_shot/);
     // the poll happened; no content GET, no jobs.json completion, no extra money event
     expect(calls.filter((c) => c.url === CONTENT_URL('vid-fixture-0001'))).toHaveLength(0);
     expect(await ledgerLines('film_x')).toHaveLength(2); // estimate + refund only
     expect((await jobsJson('film_x'))[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('job_download on a cancelled job (poll skipped) → VALIDATION naming job_status as the reserve release', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // reserve 1.224
+
+    // the reachable skipped-poll path: NO job_status ran, so no refund has
+    // fired yet — the NEXT must say "release any reserved estimate", not claim one was refunded
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [{ body: jobPayload({ status: 'cancelled', progress: 0 }) }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/job is cancelled, not completed/);
+    expect(JSON.stringify(res))
+      .toMatch(/cancelled jobs bill \$0 — poll job_status to release any reserved estimate/);
+    expect(calls.filter((c) => c.url === CONTENT_URL('vid-fixture-0001'))).toHaveLength(0); // no content GET
+    expect(await ledgerLines('film_x')).toHaveLength(1); // estimate still reserved — no refund ran here
+    expect((await jobsJson('film_x'))[0]).toMatchObject({ status: 'pending' }); // entry untouched
+  });
+
+  it('job_download on an expired job (poll skipped) → the expired analog of the release NEXT', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // reserve 1.224
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [{ body: jobPayload({ status: 'expired', progress: 0 }) }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/job is expired, not completed/);
+    expect(JSON.stringify(res))
+      .toMatch(/expired jobs bill \$0 — poll job_status to release any reserved estimate/);
+    expect(calls.filter((c) => c.url === CONTENT_URL('vid-fixture-0001'))).toHaveLength(0);
+    expect(await ledgerLines('film_x')).toHaveLength(1); // estimate still reserved — no refund ran here
+    expect((await jobsJson('film_x'))[0]).toMatchObject({ status: 'pending' }); // entry untouched
   });
 
   it('download after a refund: the reconcile accrues the ACTUAL in full (net reservation 0)', async () => {

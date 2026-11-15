@@ -476,11 +476,20 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const st = await lane.status({ jobId: entry.job_id });
     if (st.status !== 'completed') {
       if (st.status === 'failed') {
-        // truthfulness: polling cannot complete a failed job — the reserve is
-        // gone (job_status released it) and the shot needs a new render
+        // truthfulness: the refund law lives ONLY in job_status — this tool
+        // cannot know whether the agent polled, so the NEXT points at the
+        // (idempotent) poll instead of claiming a refund already ran
         throw errValidation(
           'job is failed, not completed',
-          'failed jobs bill $0 — the estimate was refunded; re-render via repair_shot',
+          'failed jobs bill $0 — poll job_status to release the reserved estimate; re-render via repair_shot',
+        );
+      }
+      if (st.status === 'cancelled' || st.status === 'expired') {
+        // same truthfulness, dead-but-not-failed: job_status releases the
+        // reserve (idempotent); this tool only refuses the download
+        throw errValidation(
+          `job is ${st.status}, not completed`,
+          `${st.status} jobs bill $0 — poll job_status to release any reserved estimate`,
         );
       }
       throw errValidation(

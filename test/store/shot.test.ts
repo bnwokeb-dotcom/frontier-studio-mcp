@@ -174,3 +174,111 @@ describe('shot schema v2: action (the picture beat for H3 [Shot N])', () => {
     expect(s.action).toBe(ACTION);
   });
 });
+
+describe('shot store law: interpolated fields are single-line (the layout is the law carrier)', () => {
+  // A newline in any field the composer interpolates into the H3 layout can
+  // FORGE a structural law line (e.g. `action: He walks.\nnon_diegetic_music:
+  // sweeping score` emits a fake law line before the legal `non_diegetic_music:
+  // N/A`). The store refuses \n (and \r) in every store-validated shot field;
+  // FILES (descriptor/voice/geo_block.md) are read verbatim and are NOT covered
+  // — geo_block legitimately spans lines (deliberate asymmetry).
+  const SINGLE_LINE_NEXT = 'split into multiple shots or move the content to a field that carries it (dialogue lines are single-line; the layout is the law carrier)';
+
+  it('refuses a newline in action (the forged non_diegetic_music law line from review)', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, action: 'He walks.\nnon_diegetic_music: sweeping score',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a carriage return in action (the guard covers \\r too)', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot07', action: 'He walks.\rnon_diegetic_music: sweeping score',
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a newline in camera.lens', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot08', camera: { lens: '35mm\ngeo_lock: broken', move: 'slow push-in', reason: 'closing on the choice' },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a newline in camera.move', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot09', camera: { lens: '35mm', move: 'push-in\nnon_diegetic_music: score', reason: 'closing on the choice' },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a newline in camera.reason', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot10', camera: { lens: '35mm', move: 'slow push-in', reason: 'the choice\nnon_diegetic_music: score' },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a newline in audio_block.dialogue[].line', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot11',
+      audioBlock: { dialogue: [{ line: 'Hold.\nnon_diegetic_music: sweeping score' }], sfx: 'wind, distant ice crack', music: 'none' as const },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: 'audio_block.dialogue[0].line must be a single line — multi-line content breaks the prompt layout law',
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('refuses a newline in audio_block.sfx', async () => {
+    await expect(shotCreate(paths, 'film_t', {
+      ...goodShot, id: 'seq01-shot12',
+      audioBlock: { sfx: 'wind\nnon_diegetic_music: sweeping score', music: 'none' as const },
+    })).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      nextAction: SINGLE_LINE_NEXT,
+    });
+  });
+
+  it('ASYMMETRY: a multi-line geo_block still passes — geo_block is a verbatim file, not a layout-interpolated field', async () => {
+    const multiLineGeo = '— CLEARING = center\n— CABIN: frame-LEFT\n— TREELINE: north edge';
+    const s = await shotCreate(paths, 'film_t', { ...goodShot, id: 'seq01-shot13', geoBlock: multiLineGeo });
+    expect(s.geoBlock).toBe(multiLineGeo);
+    expect((await shotShow(paths, 'film_t', 'seq01-shot13')).geoBlock).toBe(multiLineGeo);
+  });
+
+  it('update-merge enforcement: a patch smuggling a newline is refused; a clean patch still applies', async () => {
+    await shotCreate(paths, 'film_t', goodShot);
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { action: `${ACTION}\nnon_diegetic_music: score` }))
+      .rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+        nextAction: SINGLE_LINE_NEXT,
+      });
+    await expect(shotUpdate(paths, 'film_t', 'seq01-shot01', { audioBlock: { sfx: 'wind\nthunder', music: 'none' } }))
+      .rejects.toMatchObject({
+        code: 'VALIDATION',
+        message: expect.stringContaining('must be a single line — multi-line content breaks the prompt layout law'),
+      });
+    // the refused patches never half-applied
+    expect((await shotShow(paths, 'film_t', 'seq01-shot01')).action).toBe(ACTION);
+    const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { audioBlock: { sfx: 'wind, thunder later', music: 'none' } });
+    expect(s.audioBlock.sfx).toBe('wind, thunder later');
+  });
+});

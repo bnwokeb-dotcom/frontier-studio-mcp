@@ -26,7 +26,7 @@ const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend 
 const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
 
 function validate(input: {
-  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number;
+  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number; audioBlock?: AudioBlock;
 }): void {
   if (input.status !== undefined && !STATUSES.includes(input.status)) {
     throw errValidation(`invalid status "${input.status}"`, 'use draft|rendering|kept|rejected');
@@ -66,6 +66,27 @@ function validate(input: {
     throw errValidation('dialogue lives only in audio_block',
       'move spoken lines into audio_block.dialogue — action carries the picture');
   }
+  // Single-line law (M3 final review): every field the composer interpolates into
+  // the H3 layout must be single-line — a newline could FORGE a structural law
+  // line (e.g. `action: He walks.\nnon_diegetic_music: sweeping score` emits a
+  // fake law line before the legal `non_diegetic_music: N/A`, and H3's
+  // duplicate-key precedence is unknown). FILES (descriptor/voice/geo_block.md)
+  // are read verbatim and are deliberately NOT covered — geo_block legitimately
+  // spans lines.
+  const SINGLE_LINE_NEXT = 'split into multiple shots or move the content to a field that carries it (dialogue lines are single-line; the layout is the law carrier)';
+  const rejectNewlines = (field: string, value: string | undefined): void => {
+    if (value !== undefined && /[\n\r]/.test(value)) {
+      throw errValidation(`${field} must be a single line — multi-line content breaks the prompt layout law`, SINGLE_LINE_NEXT);
+    }
+  };
+  rejectNewlines('action', input.action);
+  rejectNewlines('camera.lens', c.lens);
+  rejectNewlines('camera.move', c.move);
+  rejectNewlines('camera.reason', c.reason);
+  (input.audioBlock?.dialogue ?? []).forEach((line, i) => {
+    rejectNewlines(`audio_block.dialogue[${i}].line`, line.line);
+  });
+  rejectNewlines('audio_block.sfx', input.audioBlock?.sfx);
 }
 
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
