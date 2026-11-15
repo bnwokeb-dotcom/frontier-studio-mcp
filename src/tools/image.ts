@@ -60,8 +60,9 @@ function stampOf(d: Date): string {
 // lane is constructed unless the studio is live. STUDIO_ROOT is passed through
 // so the load works even when the env var itself isn't set (buildServer owns
 // the root); GEMINI_API_KEY still rides from the environment. The free
-// asset_image tool never calls this.
-function liveLaneConfig(studioRoot: string): StudioConfig {
+// asset_image tool never calls this. Exported for the video lane (M3) — the
+// gate is one law, never a second copy.
+export function liveLaneConfig(studioRoot: string): StudioConfig {
   const cfg = loadConfig({ ...process.env, STUDIO_ROOT: studioRoot });
   if (!cfg.studioLive) {
     throw errValidation(

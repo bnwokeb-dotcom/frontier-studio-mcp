@@ -5,11 +5,13 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { loadConfig } from './config.js';
 import { registerRegistryTools } from './tools/registry.js';
 import { registerImageTools } from './tools/image.js';
+import { registerVideoTools } from './tools/video.js';
 
 export function buildServer(opts: { studioRoot: string }): McpServer {
   const server = new McpServer({ name: 'frontier-studio-mcp', version: '0.1.0' });
   registerRegistryTools(server, opts.studioRoot);
   registerImageTools(server, opts.studioRoot);
+  registerVideoTools(server, opts.studioRoot);
   return server;
 }
 
