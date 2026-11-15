@@ -9,7 +9,7 @@ import { studioPaths } from '../store/paths.js';
 import { filmCreate, filmShow } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
 import { assetRegister } from '../store/asset.js';
-import { shotCreate, shotUpdate, shotShow, type ShotRecord } from '../store/shot.js';
+import { shotCreate, shotUpdate, shotShow, type AudioBlock, type ShotRecord } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
 import { StudioError } from '../errors.js';
 
@@ -48,16 +48,22 @@ type WireAudioBlock = {
 
 const toStoreRef = (r: WireRef) => ({ assetId: r.asset_id, role: r.role });
 
-const toStoreAudio = (b: WireAudioBlock) => ({
-  dialogue: b.dialogue?.map((d) => ({ voiceRef: d.voice_ref, line: d.line })),
-  sfx: b.sfx,
-  music: b.music,
-});
+// R3: emit ONLY the keys present on the wire — absent keys stay absent so a
+// partial patch never persists undefined over stored data.
+const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
+  const audio: AudioBlock = {};
+  if (b.dialogue !== undefined) audio.dialogue = b.dialogue.map((d) => ({ voiceRef: d.voice_ref, line: d.line }));
+  if (b.sfx !== undefined) audio.sfx = b.sfx;
+  if (b.music !== undefined) audio.music = b.music;
+  return audio;
+};
 
 // shot_update patch: snake_case wire keys → camelCase store keys. Only known
 // ShotRecord fields pass; unknown keys are dropped. The store re-validates the
 // merged record, so a malformed patch surfaces as a doctrine refusal.
-function fromWirePatch(patch: Record<string, unknown>): Partial<ShotRecord> {
+// audio_block merges ONTO the current record's audioBlock (the store merges
+// shallowly, so without this a partial audio patch would drop stored keys).
+function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Partial<ShotRecord> {
   const p: Record<string, unknown> = {};
   for (const k of ['id', 'status', 'sequence', 'camera'] as const) {
     if (k in patch) p[k] = patch[k];
@@ -65,8 +71,9 @@ function fromWirePatch(patch: Record<string, unknown>): Partial<ShotRecord> {
   if (typeof patch.geo_block === 'string') p.geoBlock = patch.geo_block;
   if (typeof patch.duration_s === 'number') p.durationS = patch.duration_s;
   if (Array.isArray(patch.refs)) p.refs = (patch.refs as WireRef[]).map(toStoreRef);
-  if (patch.audio_block && typeof patch.audio_block === 'object') {
-    p.audioBlock = toStoreAudio(patch.audio_block as WireAudioBlock);
+  if ('audio_block' in patch && patch.audio_block && typeof patch.audio_block === 'object') {
+    const wireAudio = toStoreAudio(patch.audio_block as WireAudioBlock);
+    p.audioBlock = { ...current.audioBlock, ...wireAudio };
   }
   return p as Partial<ShotRecord>;
 }
@@ -172,7 +179,8 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     patch: z.record(z.unknown()),
   }, async (a) => guard(async () => {
     const filmId = await filmIdOf(a.film_id);
-    return out(await shotUpdate(paths, filmId, a.shot_id, fromWirePatch(a.patch)));
+    const current = await shotShow(paths, filmId, a.shot_id); // NOT_FOUND surfaces before any merge
+    return out(await shotUpdate(paths, filmId, a.shot_id, fromWirePatch(a.patch, current)));
   }));
 
   server.tool('shot_show', { film_id: z.string().optional(), shot_id: z.string() },

@@ -117,4 +117,35 @@ describe('MCP registry tools', () => {
     expect(shown).toMatch(/durationS\\?"\s*: 15/); // \" escaped inside the stringified result
     expect(shown).toContain('new wind');
   });
+
+  it('shot_update preserves audio_block keys absent from the patch (no silent data loss)', async () => {
+    await rpc('film_create', { film_id: 'film_x', title: 'X', logline: 'Y' });
+    await rpc('asset_register', { kind: 'location', asset_id: 'loc_ice', descriptor: 'Frozen forest clearing.' });
+    await rpc('shot_create', {
+      id: 'seq01-shot01', sequence: 'seq01', geo_block: 'ROOM: clearing.',
+      refs: [{ asset_id: 'loc_ice', role: 'location' }],
+      camera: { lens: '35mm', move: 'slow push-in', reason: 'closing on the choice' },
+      audio_block: { dialogue: [{ line: 'hello' }], sfx: 'wind' },
+      duration_s: 10,
+    });
+    const updated = await rpc('shot_update', { shot_id: 'seq01-shot01', patch: { audio_block: { sfx: 'rain' } } });
+    expect(isError(updated)).toBe(false);
+
+    const shown = await rpc('shot_show', { shot_id: 'seq01-shot01' });
+    const audio = audioBlockOf(shown);
+    expect(audio.sfx).toBe('rain');
+    expect(audio.dialogue).toEqual([{ line: 'hello' }]); // preserved — absent from the patch
+    expect('music' in audio).toBe(false); // absent on the wire → absent in the record
+
+    await rpc('shot_update', { shot_id: 'seq01-shot01', patch: { audio_block: {} } });
+    const afterEmpty = audioBlockOf(await rpc('shot_show', { shot_id: 'seq01-shot01' }));
+    expect(afterEmpty.sfx).toBe('rain'); // {} leaves the record intact
+    expect(afterEmpty.dialogue).toEqual([{ line: 'hello' }]);
+    expect(afterEmpty).toEqual(audio);
+  });
 });
+
+function audioBlockOf(res: unknown): Record<string, unknown> {
+  const text = (res as { content: { text: string }[] }).content[0].text;
+  return (JSON.parse(text) as { audioBlock: Record<string, unknown> }).audioBlock;
+}
