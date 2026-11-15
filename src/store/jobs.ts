@@ -21,6 +21,7 @@ export interface VideoJobEntry {
   prompt_version: string;
   // lifecycle observations (Task 4), filled in place by job_status/job_download:
   error_verbatim?: string; // FAILED entries only — the provider's error, verbatim
+  note?: string; // lifecycle note (e.g. 'estimate refunded (only completed jobs bill)')
   artifact_path?: string; // set once by job_download
   actual_cost_usd?: number; // usage.cost at completion (never the estimate)
   real_seconds?: number;

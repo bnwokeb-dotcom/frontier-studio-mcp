@@ -162,9 +162,10 @@ async function seedJobs(filmId: string, entries: Record<string, unknown>[]): Pro
   await writeJsonAtomic(studioPaths(root).jobsPath(filmId), entries);
 }
 
-// Seed the film's spentUsd — the reconcile tests stage the estimate as already
-// accrued so the delta law (spentUsd moves estimate → actual, decreasing on a
-// negative delta) is pinned symmetrically.
+// Seed the film's spentUsd — for the negative-delta test this IS the true
+// post-submit state (the reserve, R-MONEY): spentUsd carries the estimate at
+// download time, and the reconcile moves it to the actual (decreasing on a
+// negative delta).
 async function seedSpent(filmId: string, spentUsd: number): Promise<void> {
   await patchFilmMeta(studioPaths(root), filmId, (m) => ({ ...m, spentUsd }));
 }
@@ -302,8 +303,9 @@ describe('render_shot happy path (fixture fetch)', () => {
       estimated: true,
     }]);
 
-    // submit accrues NOTHING — recordSpend happens at job_download (reconcile)
-    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+    // the estimate is a RESERVED accrual at submit (R-MONEY binding ruling) —
+    // the budget law counts in-flight renders; job_download reconciles, job_status refunds
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.224, 12);
   });
 
   it('geo fallback: unlocked sequence → the location asset geo_block.md, verbatim', async () => {
@@ -504,19 +506,19 @@ describe('render_shot refusals (each with fetchNever)', () => {
 // --- M3 Task 4: job_status — poll + jobs.json lifecycle -------------------------
 
 describe('job_status', () => {
-  it('polls the lane and walks the jobs.json entry through in_progress → failed → completed', async () => {
+  it('polls the lane and walks the jobs.json entry through in_progress → completed', async () => {
     await seedShot();
-    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // creates the handle
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // handle + reserve
 
     vi.stubGlobal('fetch', scriptFetch({
       [`GET ${jobUrl('vid-fixture-0001')}`]: [
         { body: jobPayload({ status: 'in_progress', progress: 45 }) },
-        { body: jobPayload({ status: 'failed', progress: 30, error: 'content policy violation: prompt rejected by the safety filter' }) },
         { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 1.36, duration: 8 }) },
       ],
     }));
 
-    // poll 1 — in_progress; no expires_at on the payload → expires_in_hours null
+    // poll 1 — in_progress; no expires_at on the payload → expires_in_hours null;
+    // the reserve sits untouched (only a dead or downloaded job moves money)
     const r1 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
     expect(isError(r1)).toBe(false);
     expect(recordOf(r1)).toEqual({
@@ -526,38 +528,67 @@ describe('job_status', () => {
       job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'in_progress',
       submitted_ts: expect.any(String), prompt_version: 'h3-v1',
     }]);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.224, 12); // the reserve
+    expect(await ledgerLines('film_x')).toHaveLength(1);
 
-    // poll 2 — failed: error_verbatim recorded in jobs.json; money untouched
+    // poll 2 — completed: expires_in_hours from the payload's expires_at (~100h out);
+    // a completed entry must not keep stale failure text; observing completion
+    // accrues nothing — job_download reconciles
     const r2 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
-    expect(recordOf(r2)).toEqual({
-      job_id: 'vid-fixture-0001', status: 'failed', progress: 30,
-      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
-      expires_in_hours: null,
-    });
-    expect((await jobsJson('film_x'))[0]).toEqual({
-      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'failed',
-      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
-      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
-    });
-    // failed bills $0 — spec §12.1: the ledger verdict stays 'pending', NO spend event
-    expect(await ledgerLines('film_x')).toHaveLength(1); // the estimate line only
-    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
-
-    // poll 3 — completed: expires_in_hours from the payload's expires_at (~100h out);
-    // a completed entry must not keep the stale failure text
-    const r3 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
-    const o3 = recordOf(r3);
-    expect(o3.status).toBe('completed');
-    expect(o3.progress).toBe(100);
-    expect(o3.expires_in_hours).toBeCloseTo(100, 0);
-    expect(o3.error_verbatim).toBeUndefined();
+    const o2 = recordOf(r2);
+    expect(o2.status).toBe('completed');
+    expect(o2.progress).toBe(100);
+    expect(o2.expires_in_hours).toBeCloseTo(100, 0);
+    expect(o2.error_verbatim).toBeUndefined();
     expect((await jobsJson('film_x'))[0]).toEqual({
       job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
       submitted_ts: expect.any(String), prompt_version: 'h3-v1',
     });
-    // observing completion still accrues nothing — job_download reconciles
-    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.224, 12); // reserve untouched
     expect(await ledgerLines('film_x')).toHaveLength(1);
+  });
+
+  it('failed status refunds the reserved estimate — once (idempotent second poll)', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.224, 12); // the reserve
+
+    const failedBody = jobPayload({
+      status: 'failed', progress: 30,
+      error: 'content policy violation: prompt rejected by the safety filter',
+    });
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [{ body: failedBody }, { body: failedBody }],
+    }));
+
+    const res = await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    expect(recordOf(res)).toEqual({
+      job_id: 'vid-fixture-0001', status: 'failed', progress: 30,
+      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
+      expires_in_hours: null,
+    });
+
+    // the reserve is back on the film: spentUsd 1.224 − 1.224 → 0
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0, 12);
+    expect(await ledgerLines('film_x')).toEqual([
+      { ts: expect.any(String), tool: 'render_shot', lane: 'vultr', film_id: 'film_x', cost_usd: 1.224, verdict: 'pending', job_id: 'vid-fixture-0001', artifact_path: '', estimated: true },
+      { ts: expect.any(String), tool: 'job_status', lane: 'vultr', film_id: 'film_x', cost_usd: -1.224, verdict: 'pending', job_id: 'vid-fixture-0001', note: 'refund' },
+    ]);
+    expect((await jobsJson('film_x'))[0]).toEqual({
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'failed',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
+      note: 'estimate refunded (only completed jobs bill)',
+    });
+
+    // idempotent: the second failed poll does NOT refund again
+    await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    expect(await ledgerLines('film_x')).toHaveLength(2);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0, 12);
+    expect((await jobsJson('film_x'))[0]).toMatchObject({
+      status: 'failed', note: 'estimate refunded (only completed jobs bill)',
+    });
   });
 
   it('unknown job id → NOT_FOUND naming the handle file (fetchNever)', async () => {
@@ -616,9 +647,8 @@ describe('job_download', () => {
   it('happy path: mp4 written, reconcile delta accrued (+0.102), ledger delta line, completed entry', async () => {
     await seedShot({ durationS: 6 }); // 0.153 × 6 = 0.918 estimate
     expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // the estimate line
-    // The estimate as the ledger records it: spentUsd carries the estimate at
-    // download time — the reconcile moves it to the actual (money truth).
-    await seedSpent('film_x', 0.918);
+    // The estimate's accrual is the RESERVE from submit (R-MONEY ruling) —
+    // spentUsd already carries it; the reconcile moves it to the actual.
 
     vi.stubGlobal('fetch', scriptFetch({
       [`GET ${jobUrl('vid-fixture-0001')}`]: [
@@ -666,8 +696,8 @@ describe('job_download', () => {
 
   it('zero delta (actual equals the estimate) → no reconcile line, no spend movement', async () => {
     await seedShot({ durationS: 6 });
-    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // estimate 0.918
-    await seedSpent('film_x', 0.918);
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // estimate 0.918, reserved
+    // the reserve from submit already sits on the film; actual == estimate → no movement
 
     vi.stubGlobal('fetch', scriptFetch({
       [`GET ${jobUrl('vid-fixture-0001')}`]: [
@@ -685,8 +715,10 @@ describe('job_download', () => {
 
   it('negative delta (actual below the estimate) → spentUsd DECREASES — money truth', async () => {
     await seedShot();
-    // Staged handles + ledger to hit the exact spec pair (estimate 1.02 vs actual
-    // 0.918) — the render_shot → ledger integration is pinned by the happy path.
+    // Hand-seeded handles + ledger to hit the exact spec pair (estimate 1.02 vs
+    // actual 0.918) — the render_shot → ledger integration is pinned by the
+    // happy path. The spentUsd seed IS the true post-submit state now: the
+    // submit's reserve.
     await seedJobs('film_x', [{
       job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr',
       status: 'pending', submitted_ts: 't', prompt_version: 'h3-v1',
@@ -695,7 +727,7 @@ describe('job_download', () => {
       ts: 't', tool: 'render_shot', lane: 'vultr', film_id: 'film_x', cost_usd: 1.02,
       verdict: 'pending', job_id: 'vid-fixture-0001', artifact_path: '', estimated: true,
     }));
-    await seedSpent('film_x', 1.02); // the estimate, accrued
+    await seedSpent('film_x', 1.02); // the reserve, as submit accrued it
 
     vi.stubGlobal('fetch', scriptFetch({
       [`GET ${jobUrl('vid-fixture-0001')}`]: [
@@ -711,6 +743,65 @@ describe('job_download', () => {
       expect.objectContaining({ tool: 'render_shot', cost_usd: 1.02, estimated: true }),
       { ts: expect.any(String), tool: 'job_download', lane: 'vultr', film_id: 'film_x', cost_usd: -0.102, verdict: 'pending', job_id: 'vid-fixture-0001', note: 'reconcile' },
     ]);
+  });
+
+  it('job_download on a failed job → VALIDATION with the refund-aware NEXT (polling cannot complete it)', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // reserve 1.224
+
+    const failedBody = jobPayload({ status: 'failed', progress: 30, error: 'content policy violation' });
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [{ body: failedBody }, { body: failedBody }],
+    }));
+
+    // the failed poll refunds the reserve, so the NEXT text is truthful in-scenario
+    expect(isError(await rpc('job_status', { job_id: 'vid-fixture-0001' }))).toBe(false);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0, 12);
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/job is failed, not completed/);
+    expect(JSON.stringify(res)).toMatch(/failed jobs bill \$0 — the estimate was refunded; re-render via repair_shot/);
+    // the poll happened; no content GET, no jobs.json completion, no extra money event
+    expect(calls.filter((c) => c.url === CONTENT_URL('vid-fixture-0001'))).toHaveLength(0);
+    expect(await ledgerLines('film_x')).toHaveLength(2); // estimate + refund only
+    expect((await jobsJson('film_x'))[0]).toMatchObject({ status: 'failed' });
+  });
+
+  it('download after a refund: the reconcile accrues the ACTUAL in full (net reservation 0)', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // reserve 1.224
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'failed', progress: 30, error: 'content policy violation' }) },
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 1.02, duration: 8 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+
+    // the failed poll refunds the reserve: spentUsd back at 0
+    expect(isError(await rpc('job_status', { job_id: 'vid-fixture-0001' }))).toBe(false);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0, 12);
+
+    // the download then reconciles against a net reservation of 0 — the actual
+    // accrues in full; the ledger per job sums to the truth (1.224 − 1.224 + 1.02)
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    expect(recordOf(res).actual_cost_usd).toBeCloseTo(1.02, 12);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.02, 12);
+    expect(await ledgerLines('film_x')).toEqual([
+      expect.objectContaining({ tool: 'render_shot', cost_usd: 1.224, estimated: true }),
+      expect.objectContaining({ tool: 'job_status', cost_usd: -1.224, note: 'refund' }),
+      { ts: expect.any(String), tool: 'job_download', lane: 'vultr', film_id: 'film_x', cost_usd: 1.02, verdict: 'pending', job_id: 'vid-fixture-0001', note: 'reconcile' },
+    ]);
+    // the completed entry supersedes the interim refund note
+    expect((await jobsJson('film_x'))[0]).toEqual({
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+      artifact_path: `${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`,
+      actual_cost_usd: 1.02, real_seconds: 8, width: 1366, height: 768, has_audio: true,
+    });
   });
 
   it('retention warning when content expires in <48h', async () => {

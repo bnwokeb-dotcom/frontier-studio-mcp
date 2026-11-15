@@ -7,20 +7,24 @@
 // lock, else the location asset's geo_block.md, else omitted) → composeH3Prompt
 // (PURE; the 8000-char law fires here) → STUDIO_LIVE gate → the money law
 // (runBilledVideoSubmit in billed.ts: estimate → ensureBudget → submit →
-// ledger(estimated) → jobs.json — SUBMIT ONLY; result + recordSpend happen at
-// job_download). Every refusal precedes any fetch by construction.
+// recordSpend RESERVE → ledger(estimated) → jobs.json — SUBMIT ONLY; the
+// result, the reconcile and the failure refund are the lifecycle tools' law).
+// Every refusal precedes any fetch by construction.
 //
 // The ladder from the action rung down lives in ONE place — submitShotRender —
 // shared verbatim by repair_shot (M3 Task 4): both tools submit through the
 // same rungs, the same composer, the same gate and the same money law; a
 // second hand copy is forbidden by the M2 review ruling.
 //
-// The lifecycle pair closes the async loop: job_status polls lane.status and
-// updates the jobs.json entry in place (error_verbatim on failed entries only
-// — failed jobs bill $0, spec §12.1: NO spend event); job_download gates on
-// completed, downloads the mp4, and RECONCILES the accrual (actual usage.cost
-// vs the estimate recorded on the submit line — the delta line is the record,
-// the append-only ledger cannot edit the original).
+// The lifecycle pair closes the async loop under the reserve/reconcile/refund
+// money model (billed.ts header): job_status polls lane.status, updates the
+// jobs.json entry in place (error_verbatim on failed entries only) and
+// RELEASES the reserve when the job dies (failed/cancelled/expired — only
+// completed jobs bill, spec §12.1; the negative ledger line note 'refund' is
+// the record, idempotent by ledger scan); job_download gates on completed,
+// downloads the mp4, and RECONCILES the accrual (actual usage.cost vs the net
+// reservation — the delta line is the record, the append-only ledger cannot
+// edit the original).
 //
 // Characters never enter the prompt as references — the plate is the identity
 // carrier (frames XOR references; input_references reserved for M3.5 vfx).
@@ -120,26 +124,33 @@ async function jobEntryOrThrow(paths: StudioPaths, filmId: string, jobId: string
 // The reconciliation facts for one job, read off the append-only ledger:
 // - estimate: the FIRST submit line for this job_id carrying `estimated: true`
 //   (the flag — not the tool name — is the submit-line marker, so repair_shot
-//   children reconcile exactly like render_shot parents).
+//   children reconcile exactly like render_shot parents). The submit RESERVED
+//   this amount onto spentUsd (billed.ts money model).
 // - reconciled: a prior `note: 'reconcile'` line means the delta already
 //   accrued (crash-window recovery: a retry after a failed artifact write must
 //   never double the accrual).
-// No ledger / no submit line → estimate 0: the FULL actual accrues — the
-// money tooling never under-accrues on a missing record.
+// - refunded: a prior `note: 'refund'` line means the reserve was already
+//   released (a second dead-status poll must not refund again).
+// No ledger / no submit line → estimate 0: nothing was reserved, nothing
+// refunds, and the reconcile accrues the FULL actual — the money tooling
+// never under-accrues on a missing record.
 async function ledgerFactsForJob(
   paths: StudioPaths,
   filmId: string,
   jobId: string,
-): Promise<{ estimate: number; reconciled: boolean }> {
+): Promise<{ estimate: number; reconciled: boolean; refunded: boolean }> {
   let raw: string;
   try {
     raw = await readFile(paths.ledgerPath(filmId), 'utf8');
   } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { estimate: 0, reconciled: false };
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { estimate: 0, reconciled: false, refunded: false };
+    }
     throw e;
   }
   let estimate: number | undefined;
   let reconciled = false;
+  let refunded = false;
   for (const [i, l] of raw.split('\n').entries()) {
     if (l.trim() === '') continue;
     let line: unknown;
@@ -157,6 +168,7 @@ async function ledgerFactsForJob(
     const rec = line as Record<string, unknown>;
     if (rec.job_id !== jobId) continue;
     if (rec.note === 'reconcile') reconciled = true;
+    if (rec.note === 'refund') refunded = true;
     if (rec.estimated === true) {
       if (typeof rec.cost_usd !== 'number' || Number.isNaN(rec.cost_usd)) {
         throw errValidation(
@@ -167,7 +179,7 @@ async function ledgerFactsForJob(
       estimate ??= rec.cost_usd; // first submit line wins (submit order)
     }
   }
-  return { estimate: estimate ?? 0, reconciled };
+  return { estimate: estimate ?? 0, reconciled, refunded };
 }
 
 // The render ladder, rungs action → submit, ONE copy shared by render_shot and
@@ -353,10 +365,12 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     });
   }));
 
-  // Lifecycle poll: lane.status → jobs.json entry updated in place. A failed
-  // job records its provider error verbatim here and NOWHERE else — the
-  // ledger verdict stays 'pending' and NO spend event fires (failed jobs bill
-  // $0 — spec §12.1); the reconcile only ever happens on a completed download.
+  // Lifecycle poll: lane.status → jobs.json entry updated in place. A dead
+  // job (failed/cancelled/expired) records its provider error verbatim (on
+  // failed entries) and RELEASES the reserved estimate — only completed jobs
+  // bill, spec §12.1; the negative ledger line (note 'refund') is the record,
+  // idempotent by ledger scan. The reconcile only ever happens on a completed
+  // download.
   server.tool('job_status', {
     job_id: z.string(),
     film_id: z.string().optional(),
@@ -376,8 +390,35 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
     const st = await lane.status({ jobId: entry.job_id });
 
-    // 4. jobs.json: status in place; error_verbatim on FAILED only — a
-    //    completed entry must not keep a stale failure text.
+    // 4. the refund law (reserve at submit → refund on failure): a dead job
+    //    never bills — release the reserved estimate onto the film (negative
+    //    spend) and record it append-only (tool 'job_status', note 'refund').
+    //    Idempotent via the same ledger scan the reconcile uses: a prior
+    //    'refund' line means the reserve is already back in the film's pocket;
+    //    a prior 'reconcile' line means the job billed before dying (defensive
+    //    — terminal statuses cannot follow a completed download).
+    let refundNote: string | undefined;
+    if (st.status === 'failed' || st.status === 'cancelled' || st.status === 'expired') {
+      const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, entry.job_id);
+      if (!reconciled && !refunded && estimate > 0.001) {
+        await recordSpend(paths, filmId, -estimate);
+        await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+          ts: new Date().toISOString(),
+          tool: 'job_status',
+          lane: 'vultr',
+          film_id: filmId,
+          cost_usd: -estimate,
+          verdict: 'pending',
+          job_id: entry.job_id,
+          note: 'refund',
+        }));
+        refundNote = 'estimate refunded (only completed jobs bill)';
+      }
+    }
+
+    // 5. jobs.json: status in place; error_verbatim on FAILED only — a
+    //    completed entry must not keep a stale failure text; the refund note
+    //    rides only when a refund actually fired.
     const updated = await updateJob(paths, filmId, entry.job_id, (e) => {
       const next = { ...e, status: st.status };
       if (st.status === 'failed' && st.errorVerbatim !== undefined) {
@@ -385,10 +426,11 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       } else {
         delete next.error_verbatim;
       }
+      if (refundNote !== undefined) next.note = refundNote;
       return next;
     });
 
-    // 5. snake_case wire output — expires_in_hours from the payload's
+    // 6. snake_case wire output — expires_in_hours from the payload's
     //    expires_at (null when the provider sent none)
     return out({
       job_id: updated.job_id,
@@ -433,6 +475,14 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
     const st = await lane.status({ jobId: entry.job_id });
     if (st.status !== 'completed') {
+      if (st.status === 'failed') {
+        // truthfulness: polling cannot complete a failed job — the reserve is
+        // gone (job_status released it) and the shot needs a new render
+        throw errValidation(
+          'job is failed, not completed',
+          'failed jobs bill $0 — the estimate was refunded; re-render via repair_shot',
+        );
+      }
       throw errValidation(
         `job is ${st.status}, not completed — poll again`,
         'poll job_status until completed, then job_download',
@@ -443,14 +493,18 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     //    completed payload without it: money truth never silently zero)
     const art = await lane.result({ jobId: entry.job_id });
 
-    // 6. RECONCILE ACCRUAL (the async money law): delta = actual − estimate;
+    // 6. RECONCILE ACCRUAL (the async money law): delta = actual − NET
+    //    reservation (a refunded job's estimate is back in the film's pocket,
+    //    so its reconcile accrues the ACTUAL in full — the ledger per job sums
+    //    to the truth: estimate − refund + reconcile = actual);
     //    |delta| > 0.001 → recordSpend(delta) + the delta line (the append-only
     //    record — the original estimate line cannot be edited). recordSpend
     //    precedes the artifact write (money truth, billed.ts law): a failed
     //    mp4 write can never lose the charged delta. A prior reconcile line
     //    (the crash window above) skips the accrual — never double it.
-    const { estimate, reconciled } = await ledgerFactsForJob(paths, filmId, entry.job_id);
-    const delta = round4(art.costUsd - estimate);
+    const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, entry.job_id);
+    const net = refunded ? 0 : estimate;
+    const delta = round4(art.costUsd - net);
     if (!reconciled && Math.abs(delta) > 0.001) {
       await recordSpend(paths, filmId, delta);
       await appendLine(paths.ledgerPath(filmId), JSON.stringify({
@@ -470,17 +524,24 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     await ensureDir(`${paths.filmDir(filmId)}/renders/${entry.job_id}`);
     await writeFile(artifactPath, art.data);
 
-    // 8. jobs.json: the completed entry carries the artifact + the actual facts
-    const updated = await updateJob(paths, filmId, entry.job_id, (e) => ({
-      ...e,
-      status: 'completed' as const,
-      artifact_path: artifactPath,
-      actual_cost_usd: art.costUsd,
-      ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
-      ...(art.width !== undefined ? { width: art.width } : {}),
-      ...(art.height !== undefined ? { height: art.height } : {}),
-      ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
-    }));
+    // 8. jobs.json: the completed entry carries the artifact + the actual facts;
+    //    the refund note and any failure text described interim states — the
+    //    reconcile supersedes them
+    const updated = await updateJob(paths, filmId, entry.job_id, (e) => {
+      const next: VideoJobEntry = {
+        ...e,
+        status: 'completed',
+        artifact_path: artifactPath,
+        actual_cost_usd: art.costUsd,
+        ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
+        ...(art.width !== undefined ? { width: art.width } : {}),
+        ...(art.height !== undefined ? { height: art.height } : {}),
+        ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+      };
+      delete next.note;
+      delete next.error_verbatim;
+      return next;
+    });
 
     // 9. snake_case wire output; retention: Vultr keeps content 7 days —
     //    warn under 48h remaining so the take is re-downloaded, not lost

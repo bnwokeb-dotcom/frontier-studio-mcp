@@ -9,13 +9,18 @@
 // runBilledVideoSubmit — a hand-copy of either sequence in a tool is forbidden
 // by review.
 //
-// ASYMMETRY (image vs video, disclosed in the M3 plan): the video lane is
-// ASYNC — the provider charge is only knowable when the job COMPLETES, so
-// runBilledVideoSubmit stops at submit: NO result, NO recordSpend here. The
-// submit-time ledger line carries the ESTIMATE marked `estimated: true` (one
-// extra key on this line type is the reconciliation design — the ledger is
-// append-only JSONL); job_download (Task 4) later reconciles the actual
-// usage.cost against it. recordSpend for video happens THERE, never here.
+// VIDEO MONEY MODEL (binding ruling — reserve at submit, reconcile at
+// download, refund on failure): the video lane is ASYNC — the provider charge
+// is only knowable when the job COMPLETES, so the submit path RESERVES the
+// estimate: recordSpend(estimate) fires HERE, the moment the provider accepts
+// the job, so the budget law counts in-flight renders. The submit-time ledger
+// line carries the ESTIMATE marked `estimated: true` (one extra key on this
+// line type is the reconciliation design — the ledger is append-only JSONL).
+// job_download (Task 4) reconciles: actual usage.cost − net reservation →
+// delta line (note 'reconcile'); job_status releases the reserve when the job
+// dies (failed/cancelled/expired — only completed jobs bill, spec §12.1) via a
+// negative line (tool 'job_status', note 'refund'). Per job the ledger sums to
+// the truth: estimate (− refund, if it died) + reconcile delta = actual.
 //
 // Money truth (the M2 deferred minor, hardened here): the provider has charged
 // the moment result() returns, so recordSpend precedes local artifact I/O —
@@ -112,10 +117,11 @@ export interface BilledVideoSubmitResult {
   estimateUsd: number;
 }
 
-// The async money path, SUBMIT TIME ONLY (see the header asymmetry note):
-// estimatePrice → ensureBudget → submit → ledger(estimated) → jobs.json →
-// return the handle. The caller must have resolved every refusal before here —
-// no validation, ref or prompt-composition failure may follow the budget check.
+// The async money path, SUBMIT TIME ONLY (see the header money model):
+// estimatePrice → ensureBudget → submit → recordSpend(RESERVE) →
+// ledger(estimated) → jobs.json → return the handle. The caller must have
+// resolved every refusal before here — no validation, ref or prompt-composition
+// failure may follow the budget check.
 export async function runBilledVideoSubmit(opts: {
   studioRoot: string;
   filmId: string;
@@ -135,9 +141,14 @@ export async function runBilledVideoSubmit(opts: {
   // 2. hard stop BEFORE the API call
   await ensureBudget(paths, filmId, estimate);
 
-  // 3. the async submit — 202 → job ref. The provider charge is NOT incurred
-  //    here and is NOT knowable here; result + recordSpend live at download.
+  // 3. the async submit — 202 → job ref. The provider charge is NOT knowable
+  //    here, but the quote becomes a RESERVED accrual the moment the provider
+  //    accepts the job (the money model above): recordSpend precedes the local
+  //    ledger/jobs writes — a failed write can never lose the reservation.
+  //    job_download reconciles actual − estimate; job_status refunds the
+  //    reserve when the job dies.
   const ref = await lane.submit(request);
+  await recordSpend(paths, filmId, estimate);
 
   // 4. the money record: the ledger line carries the ESTIMATE, marked
   //    `estimated: true`. job_id replaces interaction_id (async jobs have no
