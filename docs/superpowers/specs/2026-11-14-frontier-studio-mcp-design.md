@@ -70,6 +70,14 @@ interface GenerationLane {
 }
 ```
 
+**Lane capability matrix** — camera/optics vocabulary is lane-specific and must never be
+invented: raw lanes (Gemini, Vultr) take prose optics authored from the `higgsfield` skill's
+`vocab.md`; a future Higgsfield/Cinema Studio lane takes **named platform presets only**
+(Director Panel movements, palette names, `*_id` strings) — never free-text camera ids, and
+never IDs not present in the skill's verified files. The lane interface carries a
+`camera_vocabulary: "prose" | "named"` capability flag so prompt composition picks the right
+register per lane.
+
 ## 5. Workspace layout (STUDIO_ROOT)
 
 ```
