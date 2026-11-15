@@ -4,6 +4,11 @@
       "type": "http",
       "url": "https://mcp.topview.ai/mcp",
       "note": "OAuth browser sign-in on first connect (TopView account). Recon: endpoint alive, returns invalid_token unauthenticated. Plan gate: MCP workflows excluded on TopView 'Unlimited' plan."
+    },
+    "rea": {
+      "command": "npx",
+      "args": ["-y", "rea-agents@6.7.0"],
+      "note": "REA reverse-engineering server (version-pinned per skill). Doctor verdict: env healthy (node 24.18, win32 x64); native engines (Hopper/Ghidra/IDA/JADX) missing — NOT needed for TopView web/MCP reversal; JS analysis needs no engine. Approving this entry gives in-session rea_* tools for the TopView reversal."
     }
   }
 }

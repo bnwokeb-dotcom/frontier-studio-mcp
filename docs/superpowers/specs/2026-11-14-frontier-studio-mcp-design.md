@@ -220,12 +220,6 @@ Typed errors, each stating the **next permitted action**:
 
 ## 12. Open items to verify at bring-up (not design gaps)
 
-1. **Vultr exact endpoint paths + webhook payload schema** — public docs were not retrievable
-   during research (404s); M3 starts with a docs/API verification pass, endpoints live as
-   constants in `src/lanes/vultr.ts`.
-2. **Vultr billing of failed renders** — assumed $0 for failed jobs; verify on first failed
-   job and encode the answer in the ledger notes.
-3. **Gemini API variant** — spec targets the Gemini Developer API (`x-goog-api-key`,
-   `POST https://generativelanguage.googleapis.com/v1beta/interactions`, `Api-Revision:
-   2026-05-20`); Vertex AI variant is a config alternative if the project ends up on GCP
-   billing.
+1. **RESOLVED 2026-11-15 — Vultr video API verified** ([api.vultrinference.com/docs](https://api.vultrinference.com/docs)): base `https://api.vultrinference.com/v1`, auth `Authorization: Bearer $VULTR_INFERENCE_API_KEY`. Endpoints: `POST /v1/videos` (submit) · `POST /v1/videos/edits` (edit) · `GET /v1/videos` (list) · `GET /v1/videos/{id}` (poll) · `GET /v1/videos/{id}/content` (download) · `DELETE /v1/videos/{id}` · **`GET /v1/videos/models` (runtime model verification — kills the silent-fallback billing trap)**. Model id `minimax-h3`. Request: `model, prompt (≤8000 chars), duration 4–15s, resolution 768p|2K|4K, aspect_ratio 16:9|9:16|4:3|3:4|1:1|21:9, frame_images (max 2, first/last), input_references (≤9 img + 3 vid + 3 aud; mutually exclusive with frame_images), generate_audio, seed, quality turbo|standard|max|ultra, callback_url`. Status enum: `pending | in_progress | completed | failed | cancelled | expired`. **Billing: only `completed` is billed** (resolves item 2 — failed/cancelled/expired cost $0); actual cost in `usage.cost` at completion. H3 renders whole 24fps blocks — real lengths run long (8s→8.00, 12s→12.25; full table in the M3 plan). **H3 native prompt layout** (`integrated_multimodal_description` → `overall_soundscape` → `non_diegetic_music`; `[Shot N]` blocks with MM:SS.mmm cuts; camera moves as sentences with amplitude/speed; dialogue `(S1)/(S2)` + `<d>[Language]...</d>`; `<scenetrans>`; `<cutoff>`; off-screen voiceover "lips remain completely closed"; references six-section layout) **natively encodes our doctrine**: `non_diegetic_music: N/A` = the no-music-in-generation law; subject definitions = verbatim descriptors; first-frame mode = images-first.
+2. **RESOLVED — Vultr billing of failed renders**: $0 per API docs (status enum above). Ledger notes still record status on every job.
+3. **Gemini API variant** — spec targets the Gemini Developer API (`x-goog-api-key`, `POST https://generativelanguage.googleapis.com/v1beta/interactions`, `Api-Revision: 2026-05-20`); Vertex AI variant is a config alternative if the project ends up on GCP billing. Live smoke (STUDIO_LIVE=1 + GEMINI_API_KEY) is the M3 Task 0 gate for fixture-contract confirmation.
