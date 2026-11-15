@@ -8,7 +8,19 @@
 // (PURE; the 8000-char law fires here) → STUDIO_LIVE gate → the money law
 // (runBilledVideoSubmit in billed.ts: estimate → ensureBudget → submit →
 // ledger(estimated) → jobs.json — SUBMIT ONLY; result + recordSpend happen at
-// job_download, Task 4). Every refusal precedes any fetch by construction.
+// job_download). Every refusal precedes any fetch by construction.
+//
+// The ladder from the action rung down lives in ONE place — submitShotRender —
+// shared verbatim by repair_shot (M3 Task 4): both tools submit through the
+// same rungs, the same composer, the same gate and the same money law; a
+// second hand copy is forbidden by the M2 review ruling.
+//
+// The lifecycle pair closes the async loop: job_status polls lane.status and
+// updates the jobs.json entry in place (error_verbatim on failed entries only
+// — failed jobs bill $0, spec §12.1: NO spend event); job_download gates on
+// completed, downloads the mp4, and RECONCILES the accrual (actual usage.cost
+// vs the estimate recorded on the submit line — the delta line is the record,
+// the append-only ledger cannot edit the original).
 //
 // Characters never enter the prompt as references — the plate is the identity
 // carrier (frames XOR references; input_references reserved for M3.5 vfx).
@@ -16,26 +28,35 @@
 // block, sfx. The shot's own stored geoBlock is deliberately NOT a prompt
 // source — the SEQUENCE lock outranks it (the store refuses mismatched copies
 // at write time; the prompt takes the lock itself).
+//
+// NOT WIRED (disclosed): repair_shot's v1 modes avoid POST /v1/videos/edits
+// entirely — that endpoint's schema is UNVERIFIED (bring-up item); both modes
+// submit plain POST /v1/videos child jobs with parent_job_id lineage. Wiring
+// edits requires a verified request shape first (docs or live probe).
 import { z } from 'zod';
-import { readFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { studioPaths } from '../store/paths.js';
 import type { AssetKindDir, StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
 import { filmMetaOrThrow } from '../store/film.js';
 import { shotShow } from '../store/shot.js';
-import type { ShotRef } from '../store/shot.js';
+import type { ShotRecord, ShotRef } from '../store/shot.js';
 import { sequenceGeo } from '../store/sequence.js';
 import { findAssetKindDir } from '../store/asset.js';
-import { readText } from '../store/fs.js';
+import { appendLine, ensureDir, readText } from '../store/fs.js';
+import { readJobs, updateJob } from '../store/jobs.js';
+import type { VideoJobEntry } from '../store/jobs.js';
 import { errNotFound, errValidation } from '../errors.js';
+import { recordSpend } from '../budget.js';
 import { composeH3Prompt } from './h3prompt.js';
 import type { H3DialogueLine } from './h3prompt.js';
 import { VultrLane } from '../lanes/vultr.js';
 import { H3_REAL_LENGTHS } from '../lanes/video.js';
+import type { VideoQuality } from '../lanes/video.js';
 import { guard, out } from './registry.js';
 import { runBilledVideoSubmit } from './billed.js';
-import { liveLaneConfig } from './image.js';
+import { liveLaneConfig, readRefImage } from './image.js';
 
 // Composer layout version stamped on every jobs.json entry — the lifecycle
 // tools (Task 4) and any future composer revision disambiguate through it.
@@ -65,6 +86,229 @@ async function findPlate(
   return undefined;
 }
 
+// Hours until the provider drops the content (expires_at), rounded to 0.1h.
+// null when the payload sent no (parseable) expires_at — the tools then simply
+// have no retention facts and stay silent about them.
+function hoursUntil(expiresAt: string | undefined): number | null {
+  if (!expiresAt) return null;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) return null;
+  return Math.round(((ms - Date.now()) / 3_600_000) * 10) / 10;
+}
+
+// Kills float noise before the ledger records it (1.02 − 0.918 is
+// 0.1020000000000002 in IEEE 754); 0.0001 USD precision keeps every real delta.
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
+}
+
+// The async handle: job_id must exist in the film's jobs.json — the file
+// render_shot / repair_shot wrote at submit. Unknown id → NOT_FOUND naming
+// the fix; this is the resolve rung, strictly before any fetch.
+async function jobEntryOrThrow(paths: StudioPaths, filmId: string, jobId: string): Promise<VideoJobEntry> {
+  const jobs = await readJobs(paths, filmId);
+  const entry = jobs.find((j) => j.job_id === jobId);
+  if (!entry) {
+    throw errNotFound(
+      `no such job "${jobId}" in film "${filmId}" (jobs.json)`,
+      'check render_shot output — job_status/job_download poll those handles',
+    );
+  }
+  return entry;
+}
+
+// The reconciliation facts for one job, read off the append-only ledger:
+// - estimate: the FIRST submit line for this job_id carrying `estimated: true`
+//   (the flag — not the tool name — is the submit-line marker, so repair_shot
+//   children reconcile exactly like render_shot parents).
+// - reconciled: a prior `note: 'reconcile'` line means the delta already
+//   accrued (crash-window recovery: a retry after a failed artifact write must
+//   never double the accrual).
+// No ledger / no submit line → estimate 0: the FULL actual accrues — the
+// money tooling never under-accrues on a missing record.
+async function ledgerFactsForJob(
+  paths: StudioPaths,
+  filmId: string,
+  jobId: string,
+): Promise<{ estimate: number; reconciled: boolean }> {
+  let raw: string;
+  try {
+    raw = await readFile(paths.ledgerPath(filmId), 'utf8');
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { estimate: 0, reconciled: false };
+    throw e;
+  }
+  let estimate: number | undefined;
+  let reconciled = false;
+  for (const [i, l] of raw.split('\n').entries()) {
+    if (l.trim() === '') continue;
+    let line: unknown;
+    try {
+      line = JSON.parse(l);
+    } catch {
+      // Loud, like jobs.json: a corrupted money record must never be skipped
+      // silently — the reconcile reads every line between here and the truth.
+      throw errValidation(
+        `ledger line ${i + 1} is not valid JSON`,
+        'the ledger is append-only — check what wrote to it by hand',
+      );
+    }
+    if (line == null || typeof line !== 'object') continue;
+    const rec = line as Record<string, unknown>;
+    if (rec.job_id !== jobId) continue;
+    if (rec.note === 'reconcile') reconciled = true;
+    if (rec.estimated === true) {
+      if (typeof rec.cost_usd !== 'number' || Number.isNaN(rec.cost_usd)) {
+        throw errValidation(
+          `the estimate line for job "${jobId}" has no numeric cost_usd`,
+          'the ledger is the money truth — check what wrote to it by hand',
+        );
+      }
+      estimate ??= rec.cost_usd; // first submit line wins (submit order)
+    }
+  }
+  return { estimate: estimate ?? 0, reconciled };
+}
+
+// The render ladder, rungs action → submit, ONE copy shared by render_shot and
+// repair_shot. Every refusal here precedes any fetch by construction (the
+// callers resolve film/shot/lineage args first). firstFrame: the caller's
+// override (repair extend — the agent's parent final-frame) or the keyframe
+// plate (staging before spend). The tool name and optional parent lineage ride
+// into the ledger line and the jobs.json entry via runBilledVideoSubmit.
+async function submitShotRender(opts: {
+  studioRoot: string;
+  paths: StudioPaths;
+  filmId: string;
+  shot: ShotRecord;
+  quality: VideoQuality;
+  firstFrame?: { data: Buffer; mimeType: string }; // repair extend — INSTEAD of the plate
+  tool: string; // ledger tool name: 'render_shot' | 'repair_shot'
+  parentJobId?: string; // repair lineage
+}): Promise<{ jobId: string; estimateUsd: number; durationS: number }> {
+  const { studioRoot, paths, filmId, shot, quality, tool } = opts;
+
+  // 1. the picture beat (schema v2; legacy pre-v2 records are refused, never
+  //    guessed at — the H3 [Shot N] block renders it verbatim)
+  if (!shot.action?.trim()) {
+    throw errValidation(
+      `shot "${shot.id}" has no action (pre-v2 record)`,
+      'shot_update the action — the H3 prompt needs the picture beat',
+    );
+  }
+
+  // 2. duration: the H3 lane law 4–15 whole seconds (the store keeps 1–30 —
+  //    multi-lane reality; whole-second because the real-length table is
+  //    integer-keyed and real_length_s must never be undefined)
+  if (!Number.isInteger(shot.durationS)) {
+    throw errValidation(
+      `duration_s must be a whole number of seconds (got ${shot.durationS})`,
+      'H3 renders whole-second blocks — use a whole 4–15s duration',
+    );
+  }
+  if (shot.durationS < 4 || shot.durationS > 15) {
+    throw errValidation(
+      `shot "${shot.id}" is ${shot.durationS}s — H3 lane renders 4–15s`,
+      'split the beat or adjust the shot',
+    );
+  }
+
+  // 3. the identity carrier: the caller's firstFrame (repair extend), else the
+  //    keyframe plate (digest feature #1 as a schema rule). Characters/props/
+  //    size_refs are skipped — a plate lives in location/style dirs only.
+  let firstFrame = opts.firstFrame;
+  if (!firstFrame) {
+    const plate = await findPlate(paths, filmId, shot.refs);
+    if (!plate) {
+      throw errValidation(
+        `shot "${shot.id}" has no keyframe plate`,
+        'keyframe_build the location first (staging before spend)',
+      );
+    }
+    firstFrame = { data: plate.data, mimeType: 'image/png' }; // plate.png is png by name law
+  }
+
+  // 4. dialogue voices: every spoken line needs a registered CHARACTER —
+  //    voice.md is the descriptor, verbatim; the line rides verbatim.
+  //    Unknown ref → NOT_FOUND pre-fetch; a non-character ref names its kind.
+  const dialogue: H3DialogueLine[] = [];
+  for (const [i, d] of (shot.audioBlock.dialogue ?? []).entries()) {
+    if (!d.voiceRef?.trim()) {
+      throw errValidation(
+        `dialogue line S${i + 1} has no voice_ref`,
+        'shot_update audio_block with a voice_ref — every spoken line needs a registered voice',
+      );
+    }
+    const kindDir = await findAssetKindDir(paths, filmId, d.voiceRef);
+    if (kindDir !== 'characters') {
+      throw errNotFound(
+        kindDir
+          ? `voice_ref "${d.voiceRef}" is a ${kindDir} asset — dialogue needs a character voice`
+          : `voice_ref "${d.voiceRef}" is not a registered character`,
+        'register the character (asset_register stores voice.md), or fix audio_block (shot_update)',
+      );
+    }
+    const voice = await readText(`${paths.assetDir(filmId, 'characters', d.voiceRef)}/voice.md`);
+    dialogue.push({ voiceRef: d.voiceRef, voiceDescriptor: voice, line: d.line });
+  }
+
+  // 5. prompt geo: the SEQUENCE lock is the law; only an unlocked sequence
+  //    falls back to the location asset's geo_block.md advisory copy;
+  //    neither → the Setting line is omitted entirely (composeH3Prompt).
+  let geoBlock = await sequenceGeo(paths, filmId, shot.sequence);
+  if (geoBlock === undefined) {
+    const loc = shot.refs.find((r) => r.role === 'location');
+    if (loc) {
+      try {
+        geoBlock = await readFile(
+          `${paths.assetDir(filmId, 'locations', loc.assetId)}/geo_block.md`,
+          'utf8',
+        );
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
+      }
+    }
+  }
+
+  // 6. compose (PURE; the 8000-char cap surfaces here as VALIDATION — before
+  //    the gate, the quote and any fetch)
+  const prompt = composeH3Prompt({
+    action: shot.action,
+    camera: shot.camera,
+    geoBlock,
+    dialogue,
+    sfx: shot.audioBlock.sfx,
+    durationS: shot.durationS,
+    platePresents: true, // the plate/firstFrame rung above guarantees Picture 1
+  });
+
+  // 7. STUDIO_LIVE gate + lane (lazily, per call) — the gate fires before
+  //    the lane exists; a missing VULTR_INFERENCE_API_KEY → AUTH here.
+  const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+  const req = {
+    prompt,
+    durationS: shot.durationS,
+    aspectRatio: '16:9', // the H3 lane's v1 frame — no wire arg by design
+    quality,
+    firstFrame,
+  };
+
+  // 8. the money law, ONE copy (billed.ts): estimate → ensureBudget →
+  //    submit → ledger(estimated) → jobs.json. NO result, NO recordSpend —
+  //    download reconciles.
+  const sub = await runBilledVideoSubmit({
+    studioRoot,
+    filmId,
+    shotId: shot.id,
+    tool,
+    lane,
+    request: req,
+    promptVersion: H3_PROMPT_VERSION,
+    ...(opts.parentJobId !== undefined ? { parentJobId: opts.parentJobId } : {}),
+  });
+  return { jobId: sub.jobId, estimateUsd: sub.estimateUsd, durationS: shot.durationS };
+}
+
 export function registerVideoTools(server: McpServer, studioRoot: string): void {
   const paths = studioPaths(studioRoot);
 
@@ -89,127 +333,254 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     // 3. shot exists
     const shot = await shotShow(paths, filmId, a.shot_id);
 
-    // 4. the picture beat (schema v2; legacy pre-v2 records are refused, never
-    //    guessed at — the H3 [Shot N] block renders it verbatim)
-    if (!shot.action?.trim()) {
-      throw errValidation(
-        `shot "${a.shot_id}" has no action (pre-v2 record)`,
-        'shot_update the action — the H3 prompt needs the picture beat',
-      );
-    }
-
-    // 5. duration: the H3 lane law 4–15 whole seconds (the store keeps 1–30 —
-    //    multi-lane reality; whole-second because the real-length table is
-    //    integer-keyed and real_length_s must never be undefined)
-    if (!Number.isInteger(shot.durationS)) {
-      throw errValidation(
-        `duration_s must be a whole number of seconds (got ${shot.durationS})`,
-        'H3 renders whole-second blocks — use a whole 4–15s duration',
-      );
-    }
-    if (shot.durationS < 4 || shot.durationS > 15) {
-      throw errValidation(
-        `shot "${a.shot_id}" is ${shot.durationS}s — H3 lane renders 4–15s`,
-        'split the beat or adjust the shot',
-      );
-    }
-
-    // 6. the keyframe plate: staging before spend (digest feature #1 as a
-    //    schema rule). Characters/props/size_refs are skipped — a plate lives
-    //    in location/style dirs only.
-    const plate = await findPlate(paths, filmId, shot.refs);
-    if (!plate) {
-      throw errValidation(
-        `shot "${a.shot_id}" has no keyframe plate`,
-        'keyframe_build the location first (staging before spend)',
-      );
-    }
-
-    // 7. dialogue voices: every spoken line needs a registered CHARACTER —
-    //    voice.md is the descriptor, verbatim; the line rides verbatim.
-    //    Unknown ref → NOT_FOUND pre-fetch; a non-character ref names its kind.
-    const dialogue: H3DialogueLine[] = [];
-    for (const [i, d] of (shot.audioBlock.dialogue ?? []).entries()) {
-      if (!d.voiceRef?.trim()) {
-        throw errValidation(
-          `dialogue line S${i + 1} has no voice_ref`,
-          'shot_update audio_block with a voice_ref — every spoken line needs a registered voice',
-        );
-      }
-      const kindDir = await findAssetKindDir(paths, filmId, d.voiceRef);
-      if (kindDir !== 'characters') {
-        throw errNotFound(
-          kindDir
-            ? `voice_ref "${d.voiceRef}" is a ${kindDir} asset — dialogue needs a character voice`
-            : `voice_ref "${d.voiceRef}" is not a registered character`,
-          'register the character (asset_register stores voice.md), or fix audio_block (shot_update)',
-        );
-      }
-      const voice = await readText(`${paths.assetDir(filmId, 'characters', d.voiceRef)}/voice.md`);
-      dialogue.push({ voiceRef: d.voiceRef, voiceDescriptor: voice, line: d.line });
-    }
-
-    // 8. prompt geo: the SEQUENCE lock is the law; only an unlocked sequence
-    //    falls back to the location asset's geo_block.md advisory copy;
-    //    neither → the Setting line is omitted entirely (composeH3Prompt).
-    let geoBlock = await sequenceGeo(paths, filmId, shot.sequence);
-    if (geoBlock === undefined) {
-      const loc = shot.refs.find((r) => r.role === 'location');
-      if (loc) {
-        try {
-          geoBlock = await readFile(
-            `${paths.assetDir(filmId, 'locations', loc.assetId)}/geo_block.md`,
-            'utf8',
-          );
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-        }
-      }
-    }
-
-    // 9. compose (PURE; the 8000-char cap surfaces here as VALIDATION — before
-    //    the gate, the quote and any fetch)
-    const prompt = composeH3Prompt({
-      action: shot.action,
-      camera: shot.camera,
-      geoBlock,
-      dialogue,
-      sfx: shot.audioBlock.sfx,
-      durationS: shot.durationS,
-      platePresents: true, // the plate rung above guarantees Picture 1
-    });
-
-    // 10. STUDIO_LIVE gate + lane (lazily, per call) — the gate fires before
-    //     the lane exists; a missing VULTR_INFERENCE_API_KEY → AUTH here.
-    const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
-    const req = {
-      prompt,
-      durationS: shot.durationS,
-      aspectRatio: '16:9', // the H3 lane's v1 frame — no wire arg by design
-      quality: a.quality ?? ('standard' as const),
-      firstFrame: { data: plate.data, mimeType: 'image/png' }, // plate.png is png by name law
-    };
-
-    // 11. the money law, ONE copy (billed.ts): estimate → ensureBudget →
-    //     submit → ledger(estimated) → jobs.json. NO result, NO recordSpend —
-    //     download reconciles (Task 4).
-    const sub = await runBilledVideoSubmit({
+    // 4–8. the shared ladder (ONE copy — repair_shot reuses it verbatim)
+    const sub = await submitShotRender({
       studioRoot,
+      paths,
       filmId,
-      shotId: a.shot_id,
+      shot,
+      quality: a.quality ?? ('standard' as const),
       tool: 'render_shot',
-      lane,
-      request: req,
-      promptVersion: H3_PROMPT_VERSION,
     });
 
-    // 12. snake_case wire output
+    // 9. snake_case wire output
     return out({
       job_id: sub.jobId,
       status: 'pending', // 202 → pending, per the submit contract
       estimated_cost_usd: sub.estimateUsd,
-      duration_s: shot.durationS,
-      real_length_s: H3_REAL_LENGTHS[shot.durationS], // whole 24fps blocks run long
+      duration_s: sub.durationS,
+      real_length_s: H3_REAL_LENGTHS[sub.durationS], // whole 24fps blocks run long
+    });
+  }));
+
+  // Lifecycle poll: lane.status → jobs.json entry updated in place. A failed
+  // job records its provider error verbatim here and NOWHERE else — the
+  // ledger verdict stays 'pending' and NO spend event fires (failed jobs bill
+  // $0 — spec §12.1); the reconcile only ever happens on a completed download.
+  server.tool('job_status', {
+    job_id: z.string(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    // 1. args
+    if (!a.job_id.trim()) {
+      throw errValidation('job_id is required', 'pass the job_id from render_shot output');
+    }
+
+    // 2. film + handle (all local — no fetch yet)
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+    await filmMetaOrThrow(paths, filmId);
+    const entry = await jobEntryOrThrow(paths, filmId, a.job_id);
+
+    // 3. STUDIO_LIVE gate + lane (lazily, per call) — the gate precedes any fetch
+    const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+    const st = await lane.status({ jobId: entry.job_id });
+
+    // 4. jobs.json: status in place; error_verbatim on FAILED only — a
+    //    completed entry must not keep a stale failure text.
+    const updated = await updateJob(paths, filmId, entry.job_id, (e) => {
+      const next = { ...e, status: st.status };
+      if (st.status === 'failed' && st.errorVerbatim !== undefined) {
+        next.error_verbatim = st.errorVerbatim;
+      } else {
+        delete next.error_verbatim;
+      }
+      return next;
+    });
+
+    // 5. snake_case wire output — expires_in_hours from the payload's
+    //    expires_at (null when the provider sent none)
+    return out({
+      job_id: updated.job_id,
+      status: st.status,
+      progress: st.progress,
+      ...(st.errorVerbatim !== undefined ? { error_verbatim: st.errorVerbatim } : {}),
+      expires_in_hours: hoursUntil(st.expiresAt),
+    });
+  }));
+
+  // The download: gate on completed → lane.result (content + usage.cost) →
+  // RECONCILE the accrual → mp4 → jobs.json completed entry. No budget check
+  // here BY DESIGN: the provider charged at completion — refusing the download
+  // cannot uncharge, it would only block recovering paid content.
+  server.tool('job_download', {
+    job_id: z.string(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    // 1. args
+    if (!a.job_id.trim()) {
+      throw errValidation('job_id is required', 'pass the job_id from render_shot output');
+    }
+
+    // 2. film + handle (local)
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+    await filmMetaOrThrow(paths, filmId);
+    const entry = await jobEntryOrThrow(paths, filmId, a.job_id);
+
+    // 3. one download per job: a second pass would reconcile the SAME charge
+    //    twice. (A retry after a failed artifact write stays reachable — the
+    //    entry gets no artifact_path until the write lands, and the ledger
+    //    reconcile note keeps that path from double-accruing.)
+    if (entry.artifact_path !== undefined) {
+      throw errValidation(
+        `job "${entry.job_id}" is already downloaded — artifact at ${entry.artifact_path}`,
+        'use the stored artifact; re-running job_download would double the reconcile accrual',
+      );
+    }
+
+    // 4. STUDIO_LIVE gate + lane — poll FIRST: content exists only on completed
+    const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+    const st = await lane.status({ jobId: entry.job_id });
+    if (st.status !== 'completed') {
+      throw errValidation(
+        `job is ${st.status}, not completed — poll again`,
+        'poll job_status until completed, then job_download',
+      );
+    }
+
+    // 5. the download — usage.cost is the ACTUAL charge (the lane refuses a
+    //    completed payload without it: money truth never silently zero)
+    const art = await lane.result({ jobId: entry.job_id });
+
+    // 6. RECONCILE ACCRUAL (the async money law): delta = actual − estimate;
+    //    |delta| > 0.001 → recordSpend(delta) + the delta line (the append-only
+    //    record — the original estimate line cannot be edited). recordSpend
+    //    precedes the artifact write (money truth, billed.ts law): a failed
+    //    mp4 write can never lose the charged delta. A prior reconcile line
+    //    (the crash window above) skips the accrual — never double it.
+    const { estimate, reconciled } = await ledgerFactsForJob(paths, filmId, entry.job_id);
+    const delta = round4(art.costUsd - estimate);
+    if (!reconciled && Math.abs(delta) > 0.001) {
+      await recordSpend(paths, filmId, delta);
+      await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+        ts: new Date().toISOString(),
+        tool: 'job_download',
+        lane: 'vultr',
+        film_id: filmId,
+        cost_usd: delta,
+        verdict: 'pending',
+        job_id: entry.job_id,
+        note: 'reconcile',
+      }));
+    }
+
+    // 7. the artifact: <filmDir>/renders/<job_id>/shot.mp4
+    const artifactPath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/shot.mp4`;
+    await ensureDir(`${paths.filmDir(filmId)}/renders/${entry.job_id}`);
+    await writeFile(artifactPath, art.data);
+
+    // 8. jobs.json: the completed entry carries the artifact + the actual facts
+    const updated = await updateJob(paths, filmId, entry.job_id, (e) => ({
+      ...e,
+      status: 'completed' as const,
+      artifact_path: artifactPath,
+      actual_cost_usd: art.costUsd,
+      ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
+      ...(art.width !== undefined ? { width: art.width } : {}),
+      ...(art.height !== undefined ? { height: art.height } : {}),
+      ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+    }));
+
+    // 9. snake_case wire output; retention: Vultr keeps content 7 days —
+    //    warn under 48h remaining so the take is re-downloaded, not lost
+    const expiresIn = hoursUntil(st.expiresAt);
+    return out({
+      job_id: updated.job_id,
+      status: 'completed',
+      artifact_path: updated.artifact_path,
+      actual_cost_usd: updated.actual_cost_usd,
+      ...(art.realSeconds !== undefined ? { real_length_s: art.realSeconds } : {}),
+      ...(art.width !== undefined ? { width: art.width } : {}),
+      ...(art.height !== undefined ? { height: art.height } : {}),
+      ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+      ...(expiresIn !== null && expiresIn < 48
+        ? { warning: `content expires in ${expiresIn}h — download or re-render` }
+        : {}),
+    });
+  }));
+
+  // The repair: v1 modes ONLY — extend (the agent's parent final-frame becomes
+  // the child's first frame) and restyle (plain re-render of the same shot).
+  // POST /v1/videos/edits is NOT wired (schema unverified — bring-up item,
+  // see the file header); both modes submit plain /v1/videos child jobs with
+  // parent_job_id lineage in jobs.json + the ledger line.
+  server.tool('repair_shot', {
+    shot_id: z.string(),
+    parent_job_id: z.string(),
+    mode: z.string(), // validated in the ladder — the refusal must name both v1 modes
+    first_frame_path: z.string().optional(),
+    film_id: z.string().optional(),
+  }, async (a) => guard(async () => {
+    // 1. args — mode first (pure arg check, precedes every resolution)
+    if (!a.shot_id.trim()) {
+      throw errValidation('shot_id is required', 'pass the shot to repair');
+    }
+    if (!a.parent_job_id.trim()) {
+      throw errValidation(
+        'parent_job_id is required',
+        'pass the parent job_id from the earlier render_shot / repair_shot output',
+      );
+    }
+    if (a.mode !== 'extend' && a.mode !== 'restyle') {
+      throw errValidation(
+        `mode "${a.mode}" is not a v1 repair mode`,
+        "v1 modes: extend (first_frame_path = the parent's final-frame screenshot) or restyle (plain re-render of the same shot)",
+      );
+    }
+
+    // 2. film: explicit id or the active one — VERIFIED
+    await initStudio(paths);
+    const filmId = a.film_id ?? (await getActiveFilm(paths));
+    await filmMetaOrThrow(paths, filmId);
+
+    // 3. shot exists
+    const shot = await shotShow(paths, filmId, a.shot_id);
+
+    // 4. the parent handle must exist — the lineage anchor
+    await jobEntryOrThrow(paths, filmId, a.parent_job_id);
+
+    // 5. mode-specific first frame: extend takes the agent-supplied parent
+    //    final-frame (path resolution + extension law, one copy in image.ts);
+    //    restyle renders from the plate and refuses the arg loudly — a
+    //    silently dropped key would turn a repair into a wrong take.
+    let firstFrame: { data: Buffer; mimeType: string } | undefined;
+    if (a.mode === 'extend') {
+      if (!a.first_frame_path?.trim()) {
+        throw errValidation(
+          'first_frame_path is required for mode extend',
+          "supply the parent's final-frame screenshot path (M3.5 will extract it; until then the agent screenshots the parent render)",
+        );
+      }
+      firstFrame = await readRefImage(paths, studioRoot, filmId, a.first_frame_path);
+    } else if (a.first_frame_path !== undefined) {
+      throw errValidation(
+        'first_frame_path applies only to mode extend',
+        'restyle re-renders the same shot — the plate carries identity; drop the arg or switch to extend',
+      );
+    }
+
+    // 6. the SAME render ladder (shared core — one copy): action → duration →
+    //    firstFrame-or-plate → voices → geo → compose → gate → budget → submit
+    const sub = await submitShotRender({
+      studioRoot,
+      paths,
+      filmId,
+      shot,
+      quality: 'standard', // v1 repair renders standard (render_shot's default)
+      ...(firstFrame !== undefined ? { firstFrame } : {}),
+      tool: 'repair_shot',
+      parentJobId: a.parent_job_id,
+    });
+
+    // 7. snake_case wire output — same shape as render_shot plus the lineage
+    return out({
+      job_id: sub.jobId,
+      status: 'pending',
+      estimated_cost_usd: sub.estimateUsd,
+      duration_s: sub.durationS,
+      real_length_s: H3_REAL_LENGTHS[sub.durationS],
+      parent_job_id: a.parent_job_id,
     });
   }));
 }

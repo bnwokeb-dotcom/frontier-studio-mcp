@@ -26,6 +26,9 @@ export interface VideoJobStatus {
   progress: number;
   errorVerbatim?: string;
   warnings?: string[];
+  /** Provider content retention (Vultr keeps content 7 days) — lifecycle tools
+   *  compute the expiry warning from it. Absent when the payload sends none. */
+  expiresAt?: string;
 }
 
 export interface VideoArtifact {

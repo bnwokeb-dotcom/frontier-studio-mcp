@@ -12,12 +12,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { buildServer } from '../../src/server.js';
 import { studioPaths } from '../../src/store/paths.js';
-import { writeJsonAtomic } from '../../src/store/fs.js';
+import { appendLine, writeJsonAtomic } from '../../src/store/fs.js';
+import { patchFilmMeta } from '../../src/store/film.js';
 import { VultrLane } from '../../src/lanes/vultr.js';
 import type { FetchLike } from '../../src/lanes/types.js';
 
 const MODELS_URL = `${VultrLane.BASE_URL}/videos/models`;
 const VIDEOS_URL = `${VultrLane.BASE_URL}/videos`;
+const jobUrl = (id: string) => `${VIDEOS_URL}/${id}`;
+const CONTENT_URL = (id: string) => `${VIDEOS_URL}/${id}/content`;
 
 // Recorded fixtures — the same bodies the lane tests pin (submit-202 carries
 // the job id the happy path asserts on).
@@ -93,6 +96,77 @@ async function jobsJson(filmId: string): Promise<Record<string, unknown>[]> {
 function postedBody(n: number): Record<string, unknown> {
   const posts = calls.filter((c) => c.method === 'POST');
   return JSON.parse(posts[n].body as string) as Record<string, unknown>;
+}
+
+// --- M3 Task 4 helpers ---------------------------------------------------------
+
+const FINAL_FRAME_BYTES = 'final-frame-png-bytes';
+
+// Recorded content fixture — the fake mp4 bytes the lane tests pin too.
+const videoBytes = () =>
+  Buffer.from(readFileSync(new URL('../fixtures/vultr/video.mp4.txt', import.meta.url), 'utf8'), 'utf8');
+
+interface ScriptedBody {
+  status?: number;
+  body?: string;
+  bytes?: Buffer;
+}
+
+// Queue-based fake fetch: scripted per METHOD+URL, responses consumed in order
+// (the lane-test pattern); records every call into `calls` like fetchOk does.
+function scriptFetch(routes: Record<string, ScriptedBody[]>): FetchLike {
+  const queue = new Map<string, ScriptedBody[]>(Object.entries(routes).map(([k, v]) => [k, [...v]]));
+  return async (url, init) => {
+    const key = `${init?.method ?? 'GET'} ${url}`;
+    calls.push({ url, method: init?.method, headers: init?.headers, body: init?.body });
+    const next = queue.get(key)?.shift();
+    if (!next) throw new Error(`unexpected ${key} — no scripted response`);
+    return {
+      ok: (next.status ?? 200) >= 200 && (next.status ?? 200) < 300,
+      status: next.status ?? 200,
+      text: async () => next.body ?? '',
+      arrayBuffer: async () => new Uint8Array(next.bytes ?? Buffer.alloc(0)).buffer,
+    };
+  };
+}
+
+// A Vultr job payload; expires_at/usage.cost/output ride only when given.
+// expiresHours is RELATIVE to now — the recorded fixture's fixed expires_at
+// (2026-11-22) would rot every assertion the moment the calendar moved past it.
+function jobPayload(o: {
+  id?: string;
+  status: string;
+  progress?: number;
+  error?: string;
+  expiresHours?: number;
+  cost?: number;
+  duration?: number;
+}): string {
+  return JSON.stringify({
+    id: o.id ?? 'vid-fixture-0001',
+    status: o.status,
+    ...(o.progress !== undefined ? { progress: o.progress } : {}),
+    ...(o.error !== undefined ? { error: o.error } : {}),
+    ...(o.expiresHours !== undefined
+      ? { expires_at: new Date(Date.now() + o.expiresHours * 3_600_000).toISOString() }
+      : {}),
+    ...(o.cost !== undefined ? { usage: { cost: o.cost } } : {}),
+    ...(o.duration !== undefined
+      ? { output: { duration: o.duration, width: 1366, height: 768, has_audio: true } }
+      : {}),
+  });
+}
+
+// Hand-seed jobs.json (refusal tests must stage handles without a fetch).
+async function seedJobs(filmId: string, entries: Record<string, unknown>[]): Promise<void> {
+  await writeJsonAtomic(studioPaths(root).jobsPath(filmId), entries);
+}
+
+// Seed the film's spentUsd — the reconcile tests stage the estimate as already
+// accrued so the delta law (spentUsd moves estimate → actual, decreasing on a
+// negative delta) is pinned symmetrically.
+async function seedSpent(filmId: string, spentUsd: number): Promise<void> {
+  await patchFilmMeta(studioPaths(root), filmId, (m) => ({ ...m, spentUsd }));
 }
 
 // --- doctrine constants -------------------------------------------------------
@@ -423,6 +497,386 @@ describe('render_shot refusals (each with fetchNever)', () => {
     expect(isError(res)).toBe(true);
     expect(JSON.stringify(res)).toMatch(/prompt is \d+ chars \(H3 cap 8000\)/);
     expect(JSON.stringify(res)).toMatch(/shorten the action text — descriptors are verbatim law and never trimmed/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// --- M3 Task 4: job_status — poll + jobs.json lifecycle -------------------------
+
+describe('job_status', () => {
+  it('polls the lane and walks the jobs.json entry through in_progress → failed → completed', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // creates the handle
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'in_progress', progress: 45 }) },
+        { body: jobPayload({ status: 'failed', progress: 30, error: 'content policy violation: prompt rejected by the safety filter' }) },
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 1.36, duration: 8 }) },
+      ],
+    }));
+
+    // poll 1 — in_progress; no expires_at on the payload → expires_in_hours null
+    const r1 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    expect(isError(r1)).toBe(false);
+    expect(recordOf(r1)).toEqual({
+      job_id: 'vid-fixture-0001', status: 'in_progress', progress: 45, expires_in_hours: null,
+    });
+    expect(await jobsJson('film_x')).toEqual([{
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'in_progress',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+    }]);
+
+    // poll 2 — failed: error_verbatim recorded in jobs.json; money untouched
+    const r2 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    expect(recordOf(r2)).toEqual({
+      job_id: 'vid-fixture-0001', status: 'failed', progress: 30,
+      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
+      expires_in_hours: null,
+    });
+    expect((await jobsJson('film_x'))[0]).toEqual({
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'failed',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+      error_verbatim: 'content policy violation: prompt rejected by the safety filter',
+    });
+    // failed bills $0 — spec §12.1: the ledger verdict stays 'pending', NO spend event
+    expect(await ledgerLines('film_x')).toHaveLength(1); // the estimate line only
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+
+    // poll 3 — completed: expires_in_hours from the payload's expires_at (~100h out);
+    // a completed entry must not keep the stale failure text
+    const r3 = await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    const o3 = recordOf(r3);
+    expect(o3.status).toBe('completed');
+    expect(o3.progress).toBe(100);
+    expect(o3.expires_in_hours).toBeCloseTo(100, 0);
+    expect(o3.error_verbatim).toBeUndefined();
+    expect((await jobsJson('film_x'))[0]).toEqual({
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+    });
+    // observing completion still accrues nothing — job_download reconciles
+    expect((await filmJson('film_x')).spentUsd).toBeUndefined();
+    expect(await ledgerLines('film_x')).toHaveLength(1);
+  });
+
+  it('unknown job id → NOT_FOUND naming the handle file (fetchNever)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedShot();
+
+    const res = await rpc('job_status', { job_id: 'vid-ghost' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/no such job \\?"vid-ghost\\?"/);
+    expect(JSON.stringify(res)).toMatch(/check render_shot output/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('STUDIO_LIVE=0 → registry-only refusal before any fetch (status AND download)', async () => {
+    vi.stubEnv('STUDIO_LIVE', '0');
+    vi.stubGlobal('fetch', fetchNever);
+    await seedShot();
+    await seedJobs('film_x', [{
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr',
+      status: 'pending', submitted_ts: 't', prompt_version: 'h3-v1',
+    }]);
+
+    const res = await rpc('job_status', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/real generation lanes are disabled \(STUDIO_LIVE=0\)/);
+    expect(calls).toHaveLength(0);
+
+    const res2 = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res2)).toBe(true);
+    expect(JSON.stringify(res2)).toMatch(/STUDIO_LIVE=0/);
+    expect(calls).toHaveLength(0);
+  });
+});
+
+// --- M3 Task 4: job_download — content + reconcile accrual ----------------------
+
+describe('job_download', () => {
+  it('download before completed → VALIDATION naming the current status; no content GET', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false);
+    const submitted = calls.length; // the submit's calls precede the scripted stub
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'in_progress', progress: 45 }) },
+      ],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/job is in_progress, not completed — poll again/);
+    // only the poll happened — content exists only on a completed job
+    expect(calls.slice(submitted).map((c) => c.url)).toEqual([jobUrl('vid-fixture-0001')]);
+    expect((await jobsJson('film_x'))[0]).toMatchObject({ status: 'pending' });
+  });
+
+  it('happy path: mp4 written, reconcile delta accrued (+0.102), ledger delta line, completed entry', async () => {
+    await seedShot({ durationS: 6 }); // 0.153 × 6 = 0.918 estimate
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // the estimate line
+    // The estimate as the ledger records it: spentUsd carries the estimate at
+    // download time — the reconcile moves it to the actual (money truth).
+    await seedSpent('film_x', 0.918);
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 1.02, duration: 6.58 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual([
+      'actual_cost_usd', 'artifact_path', 'has_audio', 'height', 'job_id', 'real_length_s', 'status', 'width',
+    ]);
+    expect(o.job_id).toBe('vid-fixture-0001');
+    expect(o.status).toBe('completed');
+    expect(o.actual_cost_usd).toBeCloseTo(1.02, 12);
+    expect(o.real_length_s).toBe(6.58);
+    expect(o.width).toBe(1366);
+    expect(o.height).toBe(768);
+    expect(o.has_audio).toBe(true);
+    expect(o.artifact_path).toBe(`${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`);
+    expect(o.warning).toBeUndefined(); // ~100h remaining — no retention warning
+
+    // the mp4 holds the fixture bytes
+    const mp4 = await readFile(`${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`);
+    expect(mp4.toString('utf8')).toBe('VULTRFAKE');
+
+    // reconcile: actual 1.02 − estimate 0.918 = delta 0.102 accrued — and the
+    // delta line IS the record (append-only ledger cannot edit the estimate line)
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(1.02, 12);
+    expect(await ledgerLines('film_x')).toEqual([
+      { ts: expect.any(String), tool: 'render_shot', lane: 'vultr', film_id: 'film_x', cost_usd: 0.153 * 6, verdict: 'pending', job_id: 'vid-fixture-0001', artifact_path: '', estimated: true },
+      { ts: expect.any(String), tool: 'job_download', lane: 'vultr', film_id: 'film_x', cost_usd: 0.102, verdict: 'pending', job_id: 'vid-fixture-0001', note: 'reconcile' },
+    ]);
+
+    // jobs.json: the completed entry carries the artifact + the actual facts
+    expect(await jobsJson('film_x')).toEqual([{
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
+      submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+      artifact_path: `${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`,
+      actual_cost_usd: 1.02, real_seconds: 6.58, width: 1366, height: 768, has_audio: true,
+    }]);
+  });
+
+  it('zero delta (actual equals the estimate) → no reconcile line, no spend movement', async () => {
+    await seedShot({ durationS: 6 });
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // estimate 0.918
+    await seedSpent('film_x', 0.918);
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 0.918, duration: 6.58 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    expect(recordOf(res).actual_cost_usd).toBeCloseTo(0.918, 12);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.918, 12); // untouched
+    expect(await ledgerLines('film_x')).toHaveLength(1); // the estimate line only — no delta line
+  });
+
+  it('negative delta (actual below the estimate) → spentUsd DECREASES — money truth', async () => {
+    await seedShot();
+    // Staged handles + ledger to hit the exact spec pair (estimate 1.02 vs actual
+    // 0.918) — the render_shot → ledger integration is pinned by the happy path.
+    await seedJobs('film_x', [{
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr',
+      status: 'pending', submitted_ts: 't', prompt_version: 'h3-v1',
+    }]);
+    await appendLine(studioPaths(root).ledgerPath('film_x'), JSON.stringify({
+      ts: 't', tool: 'render_shot', lane: 'vultr', film_id: 'film_x', cost_usd: 1.02,
+      verdict: 'pending', job_id: 'vid-fixture-0001', artifact_path: '', estimated: true,
+    }));
+    await seedSpent('film_x', 1.02); // the estimate, accrued
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 0.918, duration: 8 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    expect((await filmJson('film_x')).spentUsd).toBeCloseTo(0.918, 12); // 1.02 − 0.102 — the film owes LESS
+    expect(await ledgerLines('film_x')).toEqual([
+      expect.objectContaining({ tool: 'render_shot', cost_usd: 1.02, estimated: true }),
+      { ts: expect.any(String), tool: 'job_download', lane: 'vultr', film_id: 'film_x', cost_usd: -0.102, verdict: 'pending', job_id: 'vid-fixture-0001', note: 'reconcile' },
+    ]);
+  });
+
+  it('retention warning when content expires in <48h', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false);
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 24, cost: 1.36, duration: 8 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(false);
+    expect(recordOf(res).warning).toBe('content expires in 24h — download or re-render');
+  });
+
+  it('re-download → VALIDATION (the reconcile accrual must never double)', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false);
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${jobUrl('vid-fixture-0001')}`]: [
+        { body: jobPayload({ status: 'completed', progress: 100, expiresHours: 100, cost: 1.36, duration: 8 }) },
+      ],
+      [`GET ${CONTENT_URL('vid-fixture-0001')}`]: [{ bytes: videoBytes() }],
+    }));
+    expect(isError(await rpc('job_download', { job_id: 'vid-fixture-0001' }))).toBe(false);
+    const downloaded = calls.length; // the first download's calls precede the re-stub
+
+    vi.stubGlobal('fetch', fetchNever);
+    const res = await rpc('job_download', { job_id: 'vid-fixture-0001' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/already downloaded/);
+    expect(calls).toHaveLength(downloaded); // the refusal touched no network
+  });
+});
+
+// --- M3 Task 4: repair_shot — v1 modes with lineage -----------------------------
+
+describe('repair_shot', () => {
+  it('repair extend: the agent-supplied first frame replaces the plate; lineage lands in jobs.json + ledger', async () => {
+    const filmId = await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false); // the parent job
+    // the parent's final-frame screenshot, supplied by the agent (M3.5 extracts it)
+    await mkdir(join(root, 'films', filmId, 'refs'), { recursive: true });
+    await writeFile(join(root, 'films', filmId, 'refs', 'final-frame.png'), FINAL_FRAME_BYTES);
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${MODELS_URL}`]: [{ body: modelsBody }],
+      [`POST ${VIDEOS_URL}`]: [{ body: JSON.stringify({ id: 'vid-fixture-0002', status: 'pending' }) }],
+    }));
+
+    const res = await rpc('repair_shot', {
+      shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'extend',
+      first_frame_path: 'refs/final-frame.png',
+    });
+    expect(isError(res)).toBe(false);
+    const o = recordOf(res);
+    expect(Object.keys(o).sort()).toEqual([
+      'duration_s', 'estimated_cost_usd', 'job_id', 'parent_job_id', 'real_length_s', 'status',
+    ]);
+    expect(o.job_id).toBe('vid-fixture-0002');
+    expect(o.parent_job_id).toBe('vid-fixture-0001');
+    expect(o.status).toBe('pending');
+    expect(o.estimated_cost_usd).toBeCloseTo(1.224, 12);
+    expect(o.real_length_s).toBe(8);
+
+    // the SUPPLIED frame is the identity carrier — the plate is not sent
+    const body = postedBody(1); // POST #0 was the parent render_shot
+    expect(body.frame_images).toEqual([
+      { type: 'first_frame', image_url: { url: `data:image/png;base64,${Buffer.from(FINAL_FRAME_BYTES).toString('base64')}` } },
+    ]);
+
+    // lineage in jobs.json
+    const jobs = await jobsJson('film_x');
+    expect(jobs).toHaveLength(2);
+    expect(jobs[1]).toEqual({
+      job_id: 'vid-fixture-0002', shot_id: 's1', lane: 'vultr', parent_job_id: 'vid-fixture-0001',
+      status: 'pending', submitted_ts: expect.any(String), prompt_version: 'h3-v1',
+    });
+
+    // lineage + the repair tool on the ledger line
+    const ledger = await ledgerLines('film_x');
+    expect(ledger[1]).toEqual({
+      ts: expect.any(String), tool: 'repair_shot', lane: 'vultr', film_id: 'film_x',
+      cost_usd: 1.224, verdict: 'pending', job_id: 'vid-fixture-0002',
+      artifact_path: '', estimated: true, parent_job_id: 'vid-fixture-0001',
+    });
+    expect(ledger[0].parent_job_id).toBeUndefined(); // the plain render line carries no lineage
+  });
+
+  it('repair restyle: plain re-render of the same shot — the plate still carries identity, lineage recorded', async () => {
+    await seedShot();
+    expect(isError(await rpc('render_shot', { shot_id: 's1' }))).toBe(false);
+
+    vi.stubGlobal('fetch', scriptFetch({
+      [`GET ${MODELS_URL}`]: [{ body: modelsBody }],
+      [`POST ${VIDEOS_URL}`]: [{ body: JSON.stringify({ id: 'vid-fixture-0002', status: 'pending' }) }],
+    }));
+
+    const res = await rpc('repair_shot', { shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'restyle' });
+    expect(isError(res)).toBe(false);
+    expect(recordOf(res)).toMatchObject({
+      job_id: 'vid-fixture-0002', parent_job_id: 'vid-fixture-0001', status: 'pending',
+    });
+
+    // the PLATE is the first frame (same as render_shot) — restyle is a plain re-render
+    const body = postedBody(1);
+    expect(body.frame_images[0].image_url.url).toBe(
+      `data:image/png;base64,${Buffer.from(PLATE_BYTES).toString('base64')}`,
+    );
+
+    const jobs = await jobsJson('film_x');
+    expect(jobs[1]).toMatchObject({ parent_job_id: 'vid-fixture-0001', shot_id: 's1', status: 'pending' });
+    expect((await ledgerLines('film_x'))[1]).toMatchObject({
+      tool: 'repair_shot', parent_job_id: 'vid-fixture-0001',
+    });
+  });
+
+  it('unknown mode → VALIDATION naming both v1 modes (fetchNever)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedShot();
+
+    const res = await rpc('repair_shot', { shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'stretch' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/mode \\?"stretch\\?" is not a v1 repair mode/);
+    expect(JSON.stringify(res)).toMatch(/extend/);
+    expect(JSON.stringify(res)).toMatch(/restyle/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('unknown parent_job_id → NOT_FOUND (fetchNever)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedShot();
+
+    const res = await rpc('repair_shot', { shot_id: 's1', parent_job_id: 'vid-ghost', mode: 'restyle' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/no such job \\?"vid-ghost\\?"/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('extend without first_frame_path → VALIDATION; missing file → NOT_FOUND; restyle rejects the arg (fetchNever)', async () => {
+    vi.stubGlobal('fetch', fetchNever);
+    await seedShot();
+    await seedJobs('film_x', [{
+      job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr',
+      status: 'completed', submitted_ts: 't', prompt_version: 'h3-v1',
+    }]);
+
+    const res = await rpc('repair_shot', { shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'extend' });
+    expect(isError(res)).toBe(true);
+    expect(JSON.stringify(res)).toMatch(/first_frame_path is required for mode extend/);
+    expect(calls).toHaveLength(0);
+
+    const res2 = await rpc('repair_shot', {
+      shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'extend', first_frame_path: 'refs/ghost.png',
+    });
+    expect(isError(res2)).toBe(true);
+    expect(JSON.stringify(res2)).toMatch(/reference image not found: refs\/ghost\.png/);
+    expect(calls).toHaveLength(0);
+
+    const res3 = await rpc('repair_shot', {
+      shot_id: 's1', parent_job_id: 'vid-fixture-0001', mode: 'restyle', first_frame_path: 'refs/final-frame.png',
+    });
+    expect(isError(res3)).toBe(true);
+    expect(JSON.stringify(res3)).toMatch(/first_frame_path applies only to mode extend/);
     expect(calls).toHaveLength(0);
   });
 });

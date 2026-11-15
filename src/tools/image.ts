@@ -95,8 +95,10 @@ async function readFirstExisting(
 
 // Missing everywhere → NOT_FOUND; unsupported extension → VALIDATION naming the
 // supported set. Existence is checked before the extension so a missing file
-// never masquerades as a type refusal.
-async function readRefImage(
+// never masquerades as a type refusal. Exported for repair_shot (M3 Task 4):
+// the agent-supplied first_frame_path rides the same path-resolution and
+// extension law — never a second copy of it.
+export async function readRefImage(
   paths: StudioPaths,
   studioRoot: string,
   filmId: string,

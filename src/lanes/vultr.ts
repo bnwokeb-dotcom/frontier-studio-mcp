@@ -32,6 +32,7 @@ interface VultrJobBody {
   status?: unknown;
   progress?: unknown;
   error?: unknown;
+  expires_at?: unknown;
   usage?: { cost?: unknown };
   output?: {
     duration?: unknown;
@@ -244,6 +245,9 @@ export class VultrLane implements VideoLane {
       progress: typeof body.progress === 'number' ? body.progress : 0,
       ...(typeof body.error === 'string' && body.error !== ''
         ? { errorVerbatim: body.error }
+        : {}),
+      ...(typeof body.expires_at === 'string' && body.expires_at !== ''
+        ? { expiresAt: body.expires_at }
         : {}),
     };
   }

@@ -142,6 +142,7 @@ export async function runBilledVideoSubmit(opts: {
   // 4. the money record: the ledger line carries the ESTIMATE, marked
   //    `estimated: true`. job_id replaces interaction_id (async jobs have no
   //    interaction); artifact_path is '' — no living file points anywhere yet.
+  //    Repair submits (repair_shot, Task 4) stamp parent_job_id lineage too.
   await appendLine(paths.ledgerPath(filmId), JSON.stringify({
     ts: new Date().toISOString(),
     tool,
@@ -152,6 +153,7 @@ export async function runBilledVideoSubmit(opts: {
     job_id: ref.jobId,
     artifact_path: '',
     estimated: true,
+    ...(parentJobId !== undefined ? { parent_job_id: parentJobId } : {}),
   }));
 
   // 5. jobs.json: the async handle the lifecycle tools (Task 4) poll and update
