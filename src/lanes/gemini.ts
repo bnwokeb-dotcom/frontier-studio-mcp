@@ -85,6 +85,7 @@ export class GeminiLane implements ImageLane {
     };
 
     let res: Awaited<ReturnType<FetchLike>>;
+    let raw: string;
     try {
       res = await this.fetchFn(GeminiLane.ENDPOINT, {
         method: 'POST',
@@ -95,6 +96,7 @@ export class GeminiLane implements ImageLane {
         },
         body: JSON.stringify(body),
       });
+      raw = await res.text();
     } catch (e) {
       throw errLaneDown(
         `Gemini unreachable (${e instanceof Error ? e.message : String(e)})`,
@@ -102,7 +104,6 @@ export class GeminiLane implements ImageLane {
       );
     }
 
-    const raw = await res.text();
     if (!res.ok) {
       if (res.status === 401 || res.status === 403) {
         throw errAuth('Gemini rejected the API key', 'check GEMINI_API_KEY in the environment, then retry');
@@ -126,6 +127,12 @@ export class GeminiLane implements ImageLane {
       throw errLaneDown(
         'Gemini returned malformed JSON (unexpected response shape)',
         'retry; if it persists check status.google.com',
+      );
+    }
+    if (json == null || typeof json !== 'object') {
+      throw errLaneDown(
+        'Gemini response is not a JSON object (unexpected response shape)',
+        'retry; if it persists the API contract may have changed',
       );
     }
     const id = json.interaction?.id ?? json.id;
@@ -175,11 +182,13 @@ export class GeminiLane implements ImageLane {
     };
   }
 
-  /** First `model_output` step containing an image block. */
+  /** First `model_output` step containing an image block; non-array shapes yield none. */
   private findImageBlock(body: GeminiResponseBody): ImageBlock | undefined {
-    for (const step of body.steps ?? []) {
+    if (!Array.isArray(body.steps)) return undefined;
+    for (const step of body.steps) {
       if (step?.type !== 'model_output') continue;
-      const block = (step.output ?? []).find((b) => b?.type === 'image' && typeof b.data === 'string');
+      if (!Array.isArray(step.output)) continue;
+      const block = step.output.find((b) => b?.type === 'image' && typeof b.data === 'string');
       if (block) return block;
     }
     return undefined;

@@ -141,8 +141,28 @@ describe('GeminiLane.submit', () => {
     expect(err.message).toMatch(/ECONNREFUSED/);
   });
 
+  it('maps a body-read failure (resolves ok, text() rejects) to LANE_DOWN, not a raw error', async () => {
+    const lane = new GeminiLane('test-key', async () => ({
+      ok: true,
+      status: 200,
+      text: async () => {
+        throw new Error('socket hang up');
+      },
+    }));
+    const err = await catchStudio(() => lane.submit(baseReq()));
+    expect(err.code).toBe('LANE_DOWN');
+    expect(err.message).toMatch(/socket hang up/);
+  });
+
   it('throws LANE_DOWN on a 200 body without an interaction id (unexpected response shape)', async () => {
     const { lane } = respondWith(200, JSON.stringify({ model: 'gemini-3-pro-image' }));
+    const err = await catchStudio(() => lane.submit(baseReq()));
+    expect(err.code).toBe('LANE_DOWN');
+    expect(err.message).toMatch(/unexpected response shape/);
+  });
+
+  it('rejects a 200 body of literal null as an unexpected response shape', async () => {
+    const { lane } = respondWith(200, 'null');
     const err = await catchStudio(() => lane.submit(baseReq()));
     expect(err.code).toBe('LANE_DOWN');
     expect(err.message).toMatch(/unexpected response shape/);
@@ -185,6 +205,28 @@ describe('GeminiLane.result', () => {
       JSON.stringify({
         id: 'int-no-image',
         steps: [{ type: 'model_output', output: [{ type: 'text', text: 'prompt refused' }] }],
+      }),
+    );
+    const ref = await lane.submit(baseReq());
+    const err = await catchStudio(() => lane.result(ref));
+    expect(err.code).toBe('LANE_DOWN');
+    expect(err.message).toMatch(/no image in the Gemini response/);
+  });
+
+  it('treats a non-array steps field as no image (contract drift)', async () => {
+    const { lane } = respondWith(200, JSON.stringify({ id: 'int-steps-not-array', steps: 5 }));
+    const ref = await lane.submit(baseReq());
+    const err = await catchStudio(() => lane.result(ref));
+    expect(err.code).toBe('LANE_DOWN');
+    expect(err.message).toMatch(/no image in the Gemini response/);
+  });
+
+  it('treats a non-array step.output as no image (contract drift)', async () => {
+    const { lane } = respondWith(
+      200,
+      JSON.stringify({
+        id: 'int-output-not-array',
+        steps: [{ type: 'model_output', output: 'not-an-array' }],
       }),
     );
     const ref = await lane.submit(baseReq());
