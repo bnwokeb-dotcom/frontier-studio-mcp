@@ -3,10 +3,13 @@
 // The Gemini lane is constructed lazily, per call, ONLY here: registry tools
 // never touch it, so a missing GEMINI_API_KEY (AUTH) surfaces only when a
 // billed call actually executes. Binding order for every billed call:
-// validate args → resolve refs → STUDIO_LIVE gate → lane.price → ensureBudget
-// → submit → result → write artifact → recordSpend → ledger line. Every
-// refusal (validation, NOT_FOUND, AUTH, BUDGET) precedes the API call by
-// construction; the STUDIO_LIVE gate precedes any lane construction at all.
+// validate args → resolve refs → STUDIO_LIVE gate → runBilledTake (the money
+// law, ONE copy in src/tools/billed.ts: lane.price → ensureBudget → submit →
+// result → recordSpend → writeArtifact → ledger line). Every refusal
+// (validation, NOT_FOUND, AUTH, BUDGET) precedes the API call by construction;
+// the STUDIO_LIVE gate precedes any lane construction at all. Callers own only
+// validation, ref resolution, prompt composition, the artifact-path decision
+// and their snake_case output.
 import { z } from 'zod';
 import { randomBytes } from 'node:crypto';
 import { readFile, rm, writeFile } from 'node:fs/promises';
@@ -17,13 +20,13 @@ import type { StudioConfig } from '../config.js';
 import { studioPaths } from '../store/paths.js';
 import type { StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
-import { appendLine, ensureDir, readText, writeText } from '../store/fs.js';
+import { ensureDir, readText, writeText } from '../store/fs.js';
 import { attachImage, findAssetKindDir } from '../store/asset.js';
-import { ensureBudget, recordSpend } from '../budget.js';
 import { GeminiLane } from '../lanes/gemini.js';
 import { errNotFound, errValidation } from '../errors.js';
 import { characterSheetPrompt, keyframePrompt } from './prompts.js';
 import { guard, out } from './registry.js';
+import { runBilledTake } from './billed.js';
 
 const MAX_REFS = 14;
 
@@ -157,8 +160,8 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
       refImages.push(await readRefImage(paths, studioRoot, filmId, raw));
     }
 
-    // 4. STUDIO_LIVE gate + lane + quote (lazily, per call) — the gate fires
-    // before the lane exists, so STUDIO_LIVE=0 can never reach a billed call
+    // 4. STUDIO_LIVE gate + lane (lazily, per call) — the gate fires before the
+    // lane exists, so STUDIO_LIVE=0 can never reach a billed call
     const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = {
       prompt: a.prompt,
@@ -167,41 +170,30 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
       imageSize: a.image_size ?? '1K',
       ...(a.previous_interaction_id ? { previousInteractionId: a.previous_interaction_id } : {}),
     };
-    const price = lane.price(req);
 
-    // 5. hard stop BEFORE the API call
-    await ensureBudget(paths, filmId, price);
-
-    // 6. generate (images are synchronous: submit caches the body, result reads it back)
-    const interaction = await lane.submit(req);
-    const artifact = await lane.result(interaction);
-
-    // 7. artifact → <filmDir>/generated/<YYYYMMDD-HHmmss>-<slug>.png
-    const generatedDir = `${paths.filmDir(filmId)}/generated`;
-    const artifactPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(a.prompt)}.png`;
-    await ensureDir(generatedDir);
-    await writeFile(artifactPath, artifact.data);
-
-    // 8. spend accrues ONLY after a successful artifact
-    await recordSpend(paths, filmId, artifact.priceUsd);
-
-    // 9. ledger line
-    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
-      ts: new Date().toISOString(),
+    // 5. the money law, ONE copy (billed.ts): price → ensureBudget → submit →
+    // result → recordSpend → artifact → ledger
+    const take = await runBilledTake({
+      studioRoot,
+      filmId,
       tool: 'image_generate',
-      lane: 'gemini',
-      film_id: filmId,
-      cost_usd: artifact.priceUsd,
-      verdict: 'pending',
-      interaction_id: artifact.interactionId,
-      artifact_path: artifactPath,
-    }));
+      lane,
+      request: req,
+      writeArtifact: async (data) => {
+        // artifact → <filmDir>/generated/<YYYYMMDD-HHmmss>-<slug>.png
+        const generatedDir = `${paths.filmDir(filmId)}/generated`;
+        const artifactPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(a.prompt)}.png`;
+        await ensureDir(generatedDir);
+        await writeFile(artifactPath, data);
+        return artifactPath;
+      },
+    });
 
-    // 10. snake_case wire output
+    // 6. snake_case wire output
     return out({
-      artifact_path: artifactPath,
-      interaction_id: artifact.interactionId,
-      cost_usd: artifact.priceUsd,
+      artifact_path: take.artifactPath,
+      interaction_id: take.interactionId,
+      cost_usd: take.costUsd,
       image_size: req.imageSize,
       aspect_ratio: req.aspectRatio,
     });
@@ -245,53 +237,42 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     // 4. compose the sheet law (pure; VALIDATION on a whitespace-only descriptor)
     const prompt = characterSheetPrompt(descriptor);
 
-    // 5. STUDIO_LIVE gate + lane + quote (lazily, per call) — sheets are 1K,
-    // 16:9 by law; the gate fires before the lane exists
+    // 5. STUDIO_LIVE gate + lane (lazily, per call) — sheets are 1K, 16:9 by
+    // law; the gate fires before the lane exists
     const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
-    const price = lane.price(req);
 
-    // 6. hard stop BEFORE the API call
-    await ensureBudget(paths, filmId, price);
-
-    // 7. generate (synchronous: submit caches the body, result reads it back)
-    const interaction = await lane.submit(req);
-    const artifact = await lane.result(interaction);
-
-    // 8. attach as the canonical sheet.png via attachImage. The lane bytes are
-    // staged under the standard generated/ naming, copied, then the staging
-    // copy is dropped (best-effort: a leftover is a well-named generated
-    // artifact, never garbage) — the asset dir keeps the only copy.
-    const generatedDir = `${paths.filmDir(filmId)}/generated`;
-    const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
-    await ensureDir(generatedDir);
-    await writeFile(stagedPath, artifact.data);
-    const sheetPath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'sheet.png');
-    try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
-
-    // 9. the multi-turn seed for this asset's future generations — ONLY the id
-    await writeText(`${assetDir}/interaction.md`, artifact.interactionId);
-
-    // 10. spend accrues ONLY after a successful artifact
-    await recordSpend(paths, filmId, artifact.priceUsd);
-
-    // 11. ledger line (Task 3 shape; the durable artifact is the attached sheet)
-    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
-      ts: new Date().toISOString(),
+    // 6. the money law, ONE copy (billed.ts): price → ensureBudget → submit →
+    // result → recordSpend → artifact → ledger. The write attaches the lane
+    // bytes as the canonical sheet.png via attachImage: staged under the
+    // standard generated/ naming, copied, then the staging copy is dropped
+    // (best-effort: a leftover is a well-named generated artifact, never
+    // garbage) — the asset dir keeps the only copy.
+    const take = await runBilledTake({
+      studioRoot,
+      filmId,
       tool: 'character_sheet_build',
-      lane: 'gemini',
-      film_id: filmId,
-      cost_usd: artifact.priceUsd,
-      verdict: 'pending',
-      interaction_id: artifact.interactionId,
-      artifact_path: sheetPath,
-    }));
+      lane,
+      request: req,
+      writeArtifact: async (data) => {
+        const generatedDir = `${paths.filmDir(filmId)}/generated`;
+        const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
+        await ensureDir(generatedDir);
+        await writeFile(stagedPath, data);
+        const sheetPath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'sheet.png');
+        try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
+        return sheetPath;
+      },
+    });
 
-    // 12. snake_case wire output
+    // 7. the multi-turn seed for this asset's future generations — ONLY the id
+    await writeText(`${assetDir}/interaction.md`, take.interactionId);
+
+    // 8. snake_case wire output (Task 3 shape; the durable artifact is the attached sheet)
     return out({
-      sheet_path: sheetPath,
-      interaction_id: artifact.interactionId,
-      cost_usd: artifact.priceUsd,
+      sheet_path: take.artifactPath,
+      interaction_id: take.interactionId,
+      cost_usd: take.costUsd,
     });
   }));
 
@@ -351,53 +332,42 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     // 5. compose the light law (pure; VALIDATION on a whitespace-only light_statement)
     const prompt = keyframePrompt({ descriptor, geoBlock, lightStatement: a.light_statement });
 
-    // 6. STUDIO_LIVE gate + lane + quote (lazily, per call) — keyframes are
-    // 1K, 16:9 by law; the gate fires before the lane exists
+    // 6. STUDIO_LIVE gate + lane (lazily, per call) — keyframes are 1K, 16:9 by
+    // law; the gate fires before the lane exists
     const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
-    const price = lane.price(req);
 
-    // 7. hard stop BEFORE the API call
-    await ensureBudget(paths, filmId, price);
-
-    // 8. generate (synchronous: submit caches the body, result reads it back)
-    const interaction = await lane.submit(req);
-    const artifact = await lane.result(interaction);
-
-    // 9. attach as the canonical plate.png via attachImage (locations AND styles
-    // under the extended name law). The lane bytes are staged under the standard
-    // generated/ naming, copied, then the staging copy is dropped (best-effort) —
-    // the asset dir keeps the only copy.
-    const generatedDir = `${paths.filmDir(filmId)}/generated`;
-    const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
-    await ensureDir(generatedDir);
-    await writeFile(stagedPath, artifact.data);
-    const platePath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'plate.png');
-    try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
-
-    // 10. the multi-turn seed for this asset's future generations — ONLY the id
-    await writeText(`${assetDir}/interaction.md`, artifact.interactionId);
-
-    // 11. spend accrues ONLY after a successful artifact
-    await recordSpend(paths, filmId, artifact.priceUsd);
-
-    // 12. ledger line (Task 3 shape; the durable artifact is the attached plate)
-    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
-      ts: new Date().toISOString(),
+    // 7. the money law, ONE copy (billed.ts): price → ensureBudget → submit →
+    // result → recordSpend → artifact → ledger. The write attaches the lane
+    // bytes as the canonical plate.png via attachImage (locations AND styles
+    // under the extended name law): staged under the standard generated/ naming,
+    // copied, then the staging copy is dropped (best-effort) — the asset dir
+    // keeps the only copy.
+    const take = await runBilledTake({
+      studioRoot,
+      filmId,
       tool: 'keyframe_build',
-      lane: 'gemini',
-      film_id: filmId,
-      cost_usd: artifact.priceUsd,
-      verdict: 'pending',
-      interaction_id: artifact.interactionId,
-      artifact_path: platePath,
-    }));
+      lane,
+      request: req,
+      writeArtifact: async (data) => {
+        const generatedDir = `${paths.filmDir(filmId)}/generated`;
+        const stagedPath = `${generatedDir}/${stampOf(new Date())}-${slugOf(prompt)}.png`;
+        await ensureDir(generatedDir);
+        await writeFile(stagedPath, data);
+        const platePath = await attachImage(paths, filmId, kindDir, a.asset_id, stagedPath, 'plate.png');
+        try { await rm(stagedPath); } catch { /* staging removal is best-effort */ }
+        return platePath;
+      },
+    });
 
-    // 13. snake_case wire output
+    // 8. the multi-turn seed for this asset's future generations — ONLY the id
+    await writeText(`${assetDir}/interaction.md`, take.interactionId);
+
+    // 9. snake_case wire output (Task 3 shape; the durable artifact is the attached plate)
     return out({
-      plate_path: platePath,
-      interaction_id: artifact.interactionId,
-      cost_usd: artifact.priceUsd,
+      plate_path: take.artifactPath,
+      interaction_id: take.interactionId,
+      cost_usd: take.costUsd,
     });
   }));
 
