@@ -6,7 +6,17 @@ import { assetRefCheck } from './asset.js';
 import type { StudioPaths } from './paths.js';
 
 export interface ShotRef { assetId: string; role: 'character' | 'location' | 'prop' | 'style' | 'size_ref' }
-export interface CameraBlock { lens: string; move: string; reason: string }
+export interface CameraBlock {
+  lens: string;
+  move: string;
+  reason: string;
+  rig?: 'tripod' | 'steadicam' | 'handheld' | 'technocrane' | 'dolly_track' | 'orbit_rig';
+  movement?: 'static' | 'pan' | 'tilt' | 'dolly_in' | 'dolly_out' | 'truck_left' | 'truck_right' | 'pedestal_up' | 'pedestal_down' | 'orbit_180' | 'rack_focus';
+  framing?: 'extreme_wide' | 'master_wide' | 'medium_ots' | 'close_up' | 'extreme_close_up';
+  screenDirection?: 'screen_left' | 'screen_right' | 'center';
+  eyelineTarget?: string;
+  depthOfField?: 'deep' | 'shallow' | 'rack_focus';
+}
 export interface DialogueLine { voiceRef?: string; line: string }
 export interface AudioBlock { dialogue?: DialogueLine[]; sfx?: string; music?: 'none' }
 export interface TakeEntry { jobId: string; verdict: 'pending' | 'kept' | 'rejected'; costUsd?: number; notes?: string }
@@ -45,6 +55,21 @@ function validate(input: {
       throw errValidation(`camera.${k} is required`,
         k === 'reason' ? 'a camera move without a reason is drift — state the story job' : 'state the lens/move explicitly');
     }
+  }
+  if (c.rig !== undefined && !['tripod', 'steadicam', 'handheld', 'technocrane', 'dolly_track', 'orbit_rig'].includes(c.rig)) {
+    throw errValidation(`invalid camera.rig "${c.rig}"`, 'allowed rigs: tripod, steadicam, handheld, technocrane, dolly_track, orbit_rig');
+  }
+  if (c.movement !== undefined && !['static', 'pan', 'tilt', 'dolly_in', 'dolly_out', 'truck_left', 'truck_right', 'pedestal_up', 'pedestal_down', 'orbit_180', 'rack_focus'].includes(c.movement)) {
+    throw errValidation(`invalid camera.movement "${c.movement}"`, 'allowed movement: static, pan, tilt, dolly_in, dolly_out, truck_left, truck_right, pedestal_up, pedestal_down, orbit_180, rack_focus');
+  }
+  if (c.framing !== undefined && !['extreme_wide', 'master_wide', 'medium_ots', 'close_up', 'extreme_close_up'].includes(c.framing)) {
+    throw errValidation(`invalid camera.framing "${c.framing}"`, 'allowed framing: extreme_wide, master_wide, medium_ots, close_up, extreme_close_up');
+  }
+  if (c.screenDirection !== undefined && !['screen_left', 'screen_right', 'center'].includes(c.screenDirection)) {
+    throw errValidation(`invalid camera.screen_direction "${c.screenDirection}"`, 'allowed directions: screen_left, screen_right, center');
+  }
+  if (c.depthOfField !== undefined && !['deep', 'shallow', 'rack_focus'].includes(c.depthOfField)) {
+    throw errValidation(`invalid camera.depth_of_field "${c.depthOfField}"`, 'allowed depth_of_field: deep, shallow, rack_focus');
   }
   if (input.durationS === undefined || input.durationS <= 0 || input.durationS > MAX_TAKE_S) {
     throw errValidation(`duration_s must be 1–${MAX_TAKE_S}`,
@@ -89,6 +114,28 @@ function validate(input: {
   rejectNewlines('audio_block.sfx', input.audioBlock?.sfx);
 }
 
+export function validateEyelineContinuity(current: ShotRecord, previous?: ShotRecord): void {
+  if (!previous || !current.camera || !previous.camera) return;
+  const cCur = current.camera;
+  const cPrev = previous.camera;
+
+  if (
+    current.sequence === previous.sequence &&
+    cCur.eyelineTarget &&
+    cPrev.eyelineTarget &&
+    cCur.eyelineTarget !== cPrev.eyelineTarget &&
+    cCur.screenDirection &&
+    cPrev.screenDirection
+  ) {
+    if (cCur.screenDirection === cPrev.screenDirection && cCur.screenDirection !== 'center') {
+      throw errValidation(
+        `180-degree axis violation between "${previous.id}" and "${current.id}": both actors staged on ${cCur.screenDirection} looking across the scene in the same direction`,
+        `reverse angle on "${cCur.eyelineTarget}" must be placed on ${cCur.screenDirection === 'screen_left' ? 'screen_right' : 'screen_left'} to preserve eyeline continuity`,
+      );
+    }
+  }
+}
+
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   id: string; sequence: string; action: string; geoBlock: string; refs: ShotRef[];
   camera: CameraBlock; audioBlock: AudioBlock; durationS: number;
@@ -106,6 +153,24 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   if (await existsShot(paths, filmId, input.id)) {
     throw errValidation(`shot "${input.id}" already exists`, 'use shot_update for changes');
   }
+
+  // Eyeline and 180° axis continuity check if eyelines are specified
+  if (input.camera?.eyelineTarget && input.camera?.screenDirection) {
+    try {
+      const { readdir } = await import('node:fs/promises');
+      const files = await readdir(paths.shotsDir(filmId)).catch(() => []);
+      for (const file of files) {
+        if (!file.endsWith('.json')) continue;
+        const s = await readJson<ShotRecord>(paths.shotPath(filmId, file.replace(/\.json$/, ''))).catch(() => null);
+        if (s && s.sequence === input.sequence && s.id !== input.id) {
+          validateEyelineContinuity({ ...input, status: 'draft', takes: [] }, s);
+        }
+      }
+    } catch (e) {
+      if ((e as { code?: string })?.code === 'VALIDATION') throw e;
+    }
+  }
+
   const record: ShotRecord = {
     id: input.id, sequence: input.sequence, status: 'draft',
     action: input.action, // stored verbatim — the composer injects it byte-for-byte

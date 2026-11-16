@@ -23,7 +23,7 @@ Requires Node >= 20.
 
 No credentials are required for the M1 registry core or the free M2/M3 tools; only `STUDIO_ROOT` matters there. The billed image and video tools refuse with a structured `AUTH` error until their lane's key (`GEMINI_API_KEY` / `VULTR_INFERENCE_API_KEY`) is set.
 
-## Tools (16)
+## Tools (23)
 
 ### Registry core (M1 — 8)
 
@@ -33,18 +33,20 @@ No credentials are required for the M1 registry core or the free M2/M3 tools; on
 | `film_set_active`   | Point subsequent film-scoped calls at the given film.                        |
 | `film_show`         | Show the active film: meta, sequence geo locks, universe links. |
 | `asset_register`    | Register a `character`/`location`/`prop`/`style` asset from a `descriptor`; characters must also carry `voice` + `acting` blocks. |
-| `shot_create`       | Create a shot: verbatim `geo_block`, `refs`, full `camera` (lens/move/reason), `audio_block`, `duration_s` 1–30. |
+| `shot_create`       | Create a shot: verbatim `geo_block`, `refs`, full `camera` (lens/move/reason/rig/eyeline), `audio_block`, `duration_s` 1–30, and 180° continuity validation. |
 | `shot_update`       | Patch a shot; `id` is immutable, geo locks re-verify verbatim, `audio_block` merges per-key. |
 | `shot_show`         | Read the full shot record (status, geo, refs, camera, audio, takes).         |
 | `sequence_lock_geo` | Lock a sequence's geo block verbatim; idempotent — different text is refused. |
 
-### Image lane (M2 — 4)
+### Image, Pre-Vis & Staging lane (M2 — 6)
 
 | Tool                    | Description                                                       |
 | ----------------------- | ----------------------------------------------------------------- |
 | `image_generate`        | Billed generation via the Gemini Interactions API: `prompt` + optional refs (≤ 14), `aspect_ratio`, `image_size`, `previous_interaction_id`; writes a PNG under `generated/`, returns its path + `interaction_id` + `cost_usd`. |
 | `character_sheet_build` | Billed: reads a character's `descriptor.md`, composes the headless 3-panel sheet law, attaches the result as the asset's canonical `sheet.png`, seeds `interaction.md` for multi-turn editing. |
 | `keyframe_build`        | Billed: reads a location/style `descriptor.md` (+ `geo_block.md` verbatim when present), composes the light law from `light_statement`, attaches the result as the asset's canonical `plate.png`, seeds `interaction.md`. |
+| `staging_build`         | Billed: composites two registered characters onto a location plate with strict spatial boundaries to prevent identity bleed before video generation. |
+| `storyboard_build`      | Billed: compiles shot sequences into a 2x3 pre-vis contact sheet via Gemini before video commitment, verifying eyeline continuity, framing pacing, and tonal consistency across scene beats. |
 | `asset_image`           | Free (no lane, no budget, no ledger): copies any image file into an asset dir as its canonical `sheet.png`/`plate.png`. |
 
 ### Video lane (M3 — 4)
@@ -56,9 +58,26 @@ No credentials are required for the M1 registry core or the free M2/M3 tools; on
 | `job_download`  | Download the finished mp4 to `renders/<job_id>/shot.mp4` and **reconcile the accrual** to the actual `usage.cost`; updates `jobs.json` (artifact path, actual cost, real length, dimensions, audio) and warns when content expires in <48h. |
 | `repair_shot`   | Billed re-render with lineage (`parent_job_id` on the child job and its ledger line): `extend` (the agent-supplied parent final-frame screenshot becomes the child's first frame) or `restyle` (plain re-render from the same plate). |
 
+### Audio & Soundstage lane (M4 — 3)
+
+| Tool               | Description                                                                 |
+| ------------------ | --------------------------------------------------------------------------- |
+| `dialogue_render`  | Synthesizes broadcast-grade 48kHz WAV vocal stems for a shot using Google Text-to-Speech (or ElevenLabs) mapped to character voice specs; billed and ledgered. |
+| `soundscape_build` | Synthesizes an ambient diegetic room-tone and SFX manifest for a shot based on its `audio_block.sfx`. |
+| `acoustic_match`   | Convolves shot dialogue stems with location room impulse responses (e.g. snow forest high-frequency absorption, stone cavern slapback, wooden cabin dampening) and normalizes output to EBU R128 (-14 LUFS) with precise FFmpeg filter recipes. |
+
+### The Cutting Room & Editorial (M5 — 2)
+
+| Tool              | Description                                                                 |
+| ----------------- | --------------------------------------------------------------------------- |
+| `film_export_xml` | Exports an industry-standard **FCPXML 1.10** and **EDL** timeline for all kept shots in a sequence or film, directly compatible with DaVinci Resolve, Adobe Premiere Pro, and Final Cut Pro. |
+| `film_assemble`   | Generates an FFmpeg concatenation manifest and assembly recipe to render `rough_cut.mp4` from all kept shots with dialogue and room-tone beds. |
+
 `film_show` takes no arguments — it always shows the active film. The other film-scoped tools (`asset_register`, `shot_create`, `shot_update`, `shot_show`, `sequence_lock_geo`, and the image/video-lane tools) accept an optional `film_id`; omit it and the active film is used (a clear `NOT_FOUND` refusal tells you to set one if there is none).
 
 ## Run
+
+### Local (stdio)
 
 ```bash
 npm run build          # tsc → dist/
@@ -66,13 +85,26 @@ node dist/server.js    # run the built server over stdio
 npm run dev            # run from source via tsx
 ```
 
-Inspect and exercise the tools interactively with the MCP inspector:
+### Remote (SSE / HTTP) & Docker
+
+To connect Claude.ai (Web), ChatGPT Actions, or remote multi-agent directors over HTTPS:
 
 ```bash
-npx @modelcontextprotocol/inspector node dist/server.js
+# Set MCP_TRANSPORT=sse in .env (or run container):
+docker compose up -d
 ```
 
-The server speaks newline-delimited JSON-RPC over stdio (MCP standard) — point any MCP client at `node dist/server.js` with `STUDIO_ROOT` in its environment.
+The server exposes:
+* `GET /sse`: Server-Sent Events handshake stream for Claude / ChatGPT
+* `POST /messages`: JSON-RPC incoming tool calls
+* `GET /artifacts/*`: Static media server (MP4 video streaming with range-seeking, PNGs, WAV audio)
+* `GET /health`: Health-check probe
+
+To expose to the web securely for free:
+```bash
+npx cloudflared tunnel --url http://localhost:3000
+```
+Then plug `https://<your-tunnel>.trycloudflare.com/sse` into Claude or ChatGPT.
 
 ## Studio workspace layout
 
@@ -155,10 +187,12 @@ npm run build         # strict tsc, zero-emit-error gate
 
 ## Roadmap
 
-- ~~**M2** — image lane (Nano Banana Pro), verbatim geo/camera injection into prompts~~ — **shipped** (hard budget-stop + per-take ledger enforcement included; `budget_set`/`budget_show`/ledger read tools follow in M4)
-- ~~**M3** — video lane (Vultr H3), repair/extend chaining~~ — **shipped** (async jobs + reserve/reconcile/refund money model + repair lineage included; the vertical slice follows in M5)
-- **M4** — budget tools surface (`budget_set`, `budget_show`, `log_take`, `ledger_read`)
-- **M5** — end-to-end vertical slice (script → shots → renders)
+- ~~**M1** — Registry Core & Spatial Law Enforcement (geometry locks, 180° eyeline continuity, character completeness)~~ — **shipped**
+- ~~**M2** — Image, Pre-Vis & Staging lane (Gemini "Nano Banana Pro", 3-panel character sheets, staging plates, storyboards)~~ — **shipped**
+- ~~**M3** — Video lane (Vultr MiniMax H3, async job handles, reserve/reconcile/refund money ledger, repair lineage)~~ — **shipped**
+- ~~**M4** — Audio & Soundstage lane (Google Cloud TTS / ElevenLabs 48kHz WAV synthesis, acoustic convolution, room-tone beds)~~ — **shipped**
+- ~~**M5** — The Cutting Room & Editorial (FCPXML 1.10 & EDL timeline export, FFmpeg rough cut assembly)~~ — **shipped**
+- ~~**Remote Transport & Production Docker** — SSE & HTTP dual-mode streaming, range-seeking media server, multi-stage Alpine Docker~~ — **shipped**
 
 ## License
 

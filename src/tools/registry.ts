@@ -11,7 +11,7 @@ import { studioPaths } from '../store/paths.js';
 import { filmCreate, filmShow, type FilmMeta } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
 import { assetRegister } from '../store/asset.js';
-import { shotCreate, shotUpdate, shotShow, type AudioBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
+import { shotCreate, shotUpdate, shotShow, type AudioBlock, type CameraBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
 import { StudioError, errValidation } from '../errors.js';
 
@@ -51,6 +51,39 @@ type WireAudioBlock = {
 };
 
 const toStoreRef = (r: WireRef) => ({ assetId: r.asset_id, role: r.role });
+
+function toWireCamera(c: CameraBlock | undefined) {
+  if (!c) return { lens: '', move: '', reason: '' };
+  const w: Record<string, unknown> = {
+    lens: c.lens,
+    move: c.move,
+    reason: c.reason,
+  };
+  if (c.rig !== undefined) w.rig = c.rig;
+  if (c.movement !== undefined) w.movement = c.movement;
+  if (c.framing !== undefined) w.framing = c.framing;
+  if (c.screenDirection !== undefined) w.screen_direction = c.screenDirection;
+  if (c.eyelineTarget !== undefined) w.eyeline_target = c.eyelineTarget;
+  if (c.depthOfField !== undefined) w.depth_of_field = c.depthOfField;
+  return w;
+}
+
+function fromWireCamera(c: Record<string, unknown>): CameraBlock {
+  const store: Record<string, unknown> = {};
+  if ('lens' in c) store.lens = c.lens;
+  if ('move' in c) store.move = c.move;
+  if ('reason' in c) store.reason = c.reason;
+  if ('rig' in c) store.rig = c.rig;
+  if ('movement' in c) store.movement = c.movement;
+  if ('framing' in c) store.framing = c.framing;
+  if ('screen_direction' in c) store.screenDirection = c.screen_direction;
+  if ('screenDirection' in c) store.screenDirection = c.screenDirection;
+  if ('eyeline_target' in c) store.eyelineTarget = c.eyeline_target;
+  if ('eyelineTarget' in c) store.eyelineTarget = c.eyelineTarget;
+  if ('depth_of_field' in c) store.depthOfField = c.depth_of_field;
+  if ('depthOfField' in c) store.depthOfField = c.depthOfField;
+  return store as unknown as CameraBlock;
+}
 
 // R3: emit ONLY the keys present on the wire — absent keys stay absent so a
 // partial patch never persists undefined over stored data.
@@ -104,8 +137,8 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
     p.refs = (patch.refs as WireRef[]).map(toStoreRef);
   }
   if ('camera' in patch) {
-    if (!isObj(patch.camera)) throw errValidation('patch.camera must be an object', 'send camera as { lens, move, reason }');
-    p.camera = patch.camera;
+    if (!isObj(patch.camera)) throw errValidation('patch.camera must be an object', 'send camera as { lens, move, reason, ... }');
+    p.camera = fromWireCamera(patch.camera);
   }
   if ('audio_block' in patch) {
     if (!isObj(patch.audio_block)) throw errValidation('patch.audio_block must be an object', 'send audio_block as { dialogue?, sfx?, music? }');
@@ -142,7 +175,7 @@ function toWireShot(r: ShotRecord) {
     action: r.action, // absent on legacy pre-v2 records — JSON drops undefined
     geo_block: r.geoBlock,
     refs: (r.refs ?? []).map(toWireRef),
-    camera: r.camera ?? { lens: '', move: '', reason: '' },
+    camera: toWireCamera(r.camera),
     audio_block: toWireAudio(r.audioBlock),
     duration_s: r.durationS,
     takes: (r.takes ?? []).map((t) => {
@@ -246,7 +279,13 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       lens: z.string().optional(),
       move: z.string().optional(),
       reason: z.string().optional(),
-    }).optional(),
+      rig: z.enum(['tripod', 'steadicam', 'handheld', 'technocrane', 'dolly_track', 'orbit_rig']).optional(),
+      movement: z.enum(['static', 'pan', 'tilt', 'dolly_in', 'dolly_out', 'truck_left', 'truck_right', 'pedestal_up', 'pedestal_down', 'orbit_180', 'rack_focus']).optional(),
+      framing: z.enum(['extreme_wide', 'master_wide', 'medium_ots', 'close_up', 'extreme_close_up']).optional(),
+      screen_direction: z.enum(['screen_left', 'screen_right', 'center']).optional(),
+      eyeline_target: z.string().optional(),
+      depth_of_field: z.enum(['deep', 'shallow', 'rack_focus']).optional(),
+    }).passthrough().optional(),
     audio_block: z.object({
       dialogue: z.array(z.object({ voice_ref: z.string().optional(), line: z.string() })).optional(),
       sfx: z.string().optional(),
@@ -261,7 +300,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       action: a.action ?? '',
       geoBlock: a.geo_block ?? '',
       refs: (a.refs ?? []).map(toStoreRef),
-      camera: { lens: a.camera?.lens ?? '', move: a.camera?.move ?? '', reason: a.camera?.reason ?? '' },
+      camera: fromWireCamera(a.camera ?? {}),
       audioBlock: a.audio_block ? toStoreAudio(a.audio_block) : {},
       durationS: a.duration_s ?? 0,
     });

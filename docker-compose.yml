@@ -1,0 +1,24 @@
+services:
+  frontier-studio:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frontier-studio-mcp:latest
+    container_name: frontier-studio-mcp
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - MCP_TRANSPORT=sse
+      - PORT=3000
+      - HOST=0.0.0.0
+      - STUDIO_ROOT=/data/studio
+      - STUDIO_LIVE=${STUDIO_LIVE:-0}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - VULTR_INFERENCE_API_KEY=${VULTR_INFERENCE_API_KEY}
+    volumes:
+      - studio_data:/data/studio
+
+volumes:
+  studio_data:
+    driver: local

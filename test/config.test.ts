@@ -14,6 +14,21 @@ describe('loadConfig', () => {
     expect(cfg.geminiApiKey).toBe('k1');
     expect(cfg.vultrApiKey).toBe('vk1');
     expect(cfg.studioLive).toBe(true);
+    expect(cfg.mcpTransport).toBe('stdio');
+    expect(cfg.port).toBe(3000);
+    expect(cfg.host).toBe('0.0.0.0');
+  });
+
+  it('parses custom MCP_TRANSPORT, PORT, and HOST', () => {
+    const cfg = loadConfig({
+      STUDIO_ROOT: '/studio',
+      MCP_TRANSPORT: 'sse',
+      PORT: '8080',
+      HOST: '127.0.0.1',
+    });
+    expect(cfg.mcpTransport).toBe('sse');
+    expect(cfg.port).toBe(8080);
+    expect(cfg.host).toBe('127.0.0.1');
   });
   it('refuses to start without STUDIO_ROOT, naming the fix', () => {
     expect(() => loadConfig({})).toThrow(StudioError);

@@ -37,12 +37,13 @@ const isError = (res: unknown) => (res as { isError?: boolean }).isError === tru
 const codeOf = (e: unknown) => (e as { code?: number }).code;
 
 describe('MCP registry tools', () => {
-  it('exposes the 8 registry tools + the 4 image-lane tools + the 4 video-lane tools', async () => {
+  it('exposes all 23 production tools across all studio lanes', async () => {
     const res = await client.listTools();
     expect(res.tools.map((t) => t.name).sort()).toEqual([
-      'asset_image', 'asset_register', 'character_sheet_build', 'film_create', 'film_set_active',
-      'film_show', 'image_generate', 'job_download', 'job_status', 'keyframe_build', 'render_shot',
-      'repair_shot', 'sequence_lock_geo', 'shot_create', 'shot_show', 'shot_update',
+      'acoustic_match', 'asset_image', 'asset_register', 'character_sheet_build', 'dialogue_render', 'film_assemble', 'film_create',
+      'film_export_xml', 'film_set_active', 'film_show', 'image_generate', 'job_download', 'job_status',
+      'keyframe_build', 'render_shot', 'repair_shot', 'sequence_lock_geo', 'shot_create', 'shot_show',
+      'shot_update', 'soundscape_build', 'staging_build', 'storyboard_build',
     ]);
   });
 

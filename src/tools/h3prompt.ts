@@ -59,8 +59,12 @@ export function composeH3Prompt(parts: H3PromptParts): string {
     lines.push('Live-action, cinematic realism, 24fps.');
     lines.push('Picture 1 is fully referenced at 0.00s in Shot 1.');
   }
-  lines.push(`[Shot 1] ${parts.camera.lens}: ${parts.action}`);
-  lines.push(`Camera: The camera ${parts.camera.move}, with ${amplitude} at ${speed} — ${parts.camera.reason}.`);
+  const framing = parts.camera.framing ? ` (${parts.camera.framing.replace(/_/g, ' ')})` : '';
+  lines.push(`[Shot 1] ${parts.camera.lens}${framing}: ${parts.action}`);
+
+  const rig = parts.camera.rig ? `[${parts.camera.rig}] ` : '';
+  const dof = parts.camera.depthOfField ? `, ${parts.camera.depthOfField.replace(/_/g, ' ')} depth of field` : '';
+  lines.push(`Camera: The camera ${rig}${parts.camera.move}, with ${amplitude} at ${speed}${dof} — ${parts.camera.reason}.`);
   parts.dialogue.forEach((d, i) => {
     lines.push(`(S${i + 1}) — ${d.voiceDescriptor} says: <d>[English]${d.line}</d>`);
   });

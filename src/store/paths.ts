@@ -11,6 +11,9 @@ export interface StudioPaths {
   shotsDir(filmId: string): string;
   shotPath(filmId: string, shotId: string): string;
   rendersDir(filmId: string): string;
+  storyboardsDir(filmId: string): string;
+  audioDir(filmId: string): string;
+  audioPath(filmId: string, file: string): string;
   jobsPath(filmId: string): string;
   ledgerPath(filmId: string): string;
 }
@@ -27,6 +30,9 @@ export function studioPaths(root: string): StudioPaths {
     shotsDir: (f) => j('films', f, 'shots'),
     shotPath: (f, s) => j('films', f, 'shots', `${s}.json`),
     rendersDir: (f) => j('films', f, 'renders'),
+    storyboardsDir: (f) => j('films', f, 'storyboards'),
+    audioDir: (f) => j('films', f, 'audio'),
+    audioPath: (f, file) => j('films', f, 'audio', file),
     jobsPath: (f) => j('films', f, 'jobs.json'),
     ledgerPath: (f) => j('films', f, 'ledger.jsonl'),
   };

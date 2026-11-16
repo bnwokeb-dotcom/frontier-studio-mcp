@@ -281,4 +281,71 @@ describe('shot store law: interpolated fields are single-line (the layout is the
     const s = await shotUpdate(paths, 'film_t', 'seq01-shot01', { audioBlock: { sfx: 'wind, thunder later', music: 'none' } });
     expect(s.audioBlock.sfx).toBe('wind, thunder later');
   });
+
+  it('accepts advanced cinema rig, optics, framing, and depth of field', async () => {
+    const shot = await shotCreate(paths, 'film_t', {
+      ...goodShot,
+      id: 'seq01-shot20',
+      camera: {
+        lens: '85mm',
+        move: 'slow tracking push-in',
+        reason: 'capturing emotional realization',
+        rig: 'steadicam',
+        framing: 'close_up',
+        depthOfField: 'shallow',
+        screenDirection: 'screen_left',
+        eyelineTarget: 'char_mara',
+      },
+    });
+    expect(shot.camera.rig).toBe('steadicam');
+    expect(shot.camera.framing).toBe('close_up');
+    expect(shot.camera.depthOfField).toBe('shallow');
+  });
+
+  it('detects and refuses 180-degree axis violations in sequence dialogue', async () => {
+    // Shot 1: Mara on screen left looking at Eli
+    await shotCreate(paths, 'film_t', {
+      ...goodShot,
+      id: 'seq01-shot21',
+      camera: {
+        lens: '50mm',
+        move: 'static',
+        reason: 'Mara speaking',
+        screenDirection: 'screen_left',
+        eyelineTarget: 'char_eli',
+      },
+    });
+
+    // Shot 2: Reverse angle on Eli, but incorrectly placed on screen_left looking at Mara
+    await expect(
+      shotCreate(paths, 'film_t', {
+        ...goodShot,
+        id: 'seq01-shot22',
+        camera: {
+          lens: '50mm',
+          move: 'static',
+          reason: 'Eli replying',
+          screenDirection: 'screen_left', // VIOLATION: Should be screen_right
+          eyelineTarget: 'char_mara',
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('180-degree axis violation'),
+    });
+
+    // Compliant reverse angle on screen right succeeds
+    const s2 = await shotCreate(paths, 'film_t', {
+      ...goodShot,
+      id: 'seq01-shot22',
+      camera: {
+        lens: '50mm',
+        move: 'static',
+        reason: 'Eli replying',
+        screenDirection: 'screen_right',
+        eyelineTarget: 'char_mara',
+      },
+    });
+    expect(s2.camera.screenDirection).toBe('screen_right');
+  });
 });
