@@ -23,7 +23,7 @@ Requires Node >= 20.
 
 No credentials are required for the M1 registry core or the free M2/M3 tools; only `STUDIO_ROOT` matters there. The billed image and video tools refuse with a structured `AUTH` error until their lane's key (`GEMINI_API_KEY` / `VULTR_INFERENCE_API_KEY`) is set.
 
-## Tools (23)
+## Tools (25)
 
 ### Registry core (M1 — 8)
 
@@ -33,9 +33,9 @@ No credentials are required for the M1 registry core or the free M2/M3 tools; on
 | `film_set_active`   | Point subsequent film-scoped calls at the given film.                        |
 | `film_show`         | Show the active film: meta, sequence geo locks, universe links. |
 | `asset_register`    | Register a `character`/`location`/`prop`/`style` asset from a `descriptor`; characters must also carry `voice` + `acting` blocks. |
-| `shot_create`       | Create a shot: verbatim `geo_block`, `refs`, full `camera` (lens/move/reason/rig/eyeline), `audio_block`, `duration_s` 1–30, and 180° continuity validation. |
+| `shot_create`       | Create a shot: verbatim `geo_block`, `refs`, full `camera` (lens/move/reason/rig/eyeline), `cinematics` (film stock/optics/lighting/era), `audio_block`, `duration_s` 1–30, and 180° continuity validation. |
 | `shot_update`       | Patch a shot; `id` is immutable, geo locks re-verify verbatim, `audio_block` merges per-key. |
-| `shot_show`         | Read the full shot record (status, geo, refs, camera, audio, takes).         |
+| `shot_show`         | Read the full shot record (status, geo, refs, camera, cinematics, audio, takes). |
 | `sequence_lock_geo` | Lock a sequence's geo block verbatim; idempotent — different text is refused. |
 
 ### Image, Pre-Vis & Staging lane (M2 — 6)
@@ -53,10 +53,10 @@ No credentials are required for the M1 registry core or the free M2/M3 tools; on
 
 | Tool            | Description                                                                 |
 | --------------- | --------------------------------------------------------------------------- |
-| `render_shot`   | Billed async render: composes the doctrine-native H3 prompt from the shot record (action verbatim, camera law, dialogue via `voice.md`, the sequence geo lock), renders 4–15s from the shot's keyframe plate (first-frame I2V), **reserves the estimated cost** against the budget, and returns the job handle (`job_id`, `estimated_cost_usd`, `real_length_s`). |
-| `job_status`    | Poll a render job: provider status + progress, `expires_in_hours`; updates `jobs.json` in place. A dead job (failed/cancelled/expired) records the provider error verbatim and **refunds the reserved estimate** — only completed jobs bill. |
-| `job_download`  | Download the finished mp4 to `renders/<job_id>/shot.mp4` and **reconcile the accrual** to the actual `usage.cost`; updates `jobs.json` (artifact path, actual cost, real length, dimensions, audio) and warns when content expires in <48h. |
-| `repair_shot`   | Billed re-render with lineage (`parent_job_id` on the child job and its ledger line): `extend` (the agent-supplied parent final-frame screenshot becomes the child's first frame) or `restyle` (plain re-render from the same plate). |
+| `render_shot`   | Billed async render: composes the doctrine-native H3 prompt from the shot record (action verbatim, camera law, dialogue via `voice.md`, sequence geo lock, optical cinematics), renders 4–15s from keyframe plate (first-frame I2V), **reserves estimated cost** against budget, and returns job handle. |
+| `job_status`    | Poll a render job: provider status + progress, `expires_in_hours`; updates `jobs.json` in place. A dead job records provider error verbatim and **refunds reserved estimate**. |
+| `job_download`  | Download finished mp4 to `renders/<job_id>/shot.mp4` and **reconcile accrual** to actual `usage.cost`; updates `jobs.json` and warns when content expires in <48h. |
+| `repair_shot`   | Billed re-render with lineage (`parent_job_id` on child job and ledger line): `extend` (parent final frame becomes child first frame) or `restyle` (re-render from same plate). |
 
 ### Audio & Soundstage lane (M4 — 3)
 
@@ -66,12 +66,22 @@ No credentials are required for the M1 registry core or the free M2/M3 tools; on
 | `soundscape_build` | Synthesizes an ambient diegetic room-tone and SFX manifest for a shot based on its `audio_block.sfx`. |
 | `acoustic_match`   | Convolves shot dialogue stems with location room impulse responses (e.g. snow forest high-frequency absorption, stone cavern slapback, wooden cabin dampening) and normalizes output to EBU R128 (-14 LUFS) with precise FFmpeg filter recipes. |
 
-### The Cutting Room & Editorial (M5 — 2)
+### The Cutting Room & Editorial (M5 — 4)
 
 | Tool              | Description                                                                 |
 | ----------------- | --------------------------------------------------------------------------- |
 | `film_export_xml` | Exports an industry-standard **FCPXML 1.10** and **EDL** timeline for all kept shots in a sequence or film, directly compatible with DaVinci Resolve, Adobe Premiere Pro, and Final Cut Pro. |
 | `film_assemble`   | Generates an FFmpeg concatenation manifest and assembly recipe to render `rough_cut.mp4` from all kept shots with dialogue and room-tone beds. |
+| `film_grade`      | Applies Hollywood film stock emulation (Kodak Vision3 500T, ARRI Alexa 35, Fuji Eterna, Bleach Bypass, Tri-X 35mm), photochemical 35mm grain, period era styling (1920s Silent, 1940s Noir, 1970s Panavision, 1980s VHS, 1990s Indie, Contemporary), and 2.39:1 / 1.33:1 letterbox masking via FFmpeg. |
+| `shot_lipsync`    | Synchronizes and multiplexes dialogue audio stem (WAV) with shot video take, with support for FFmpeg audio alignment and neural lip-sync pipelines. |
+
+## Directorial Prompts (MCP Prompts)
+
+Connected AI agents (Claude, ChatGPT, Cursor) can query and execute native directorial prompt workflows:
+
+* `director_breakdown`: Directs complete screenplay breakdown into cast, locked geo blocks, and shot lists with script continuity laws.
+* `cinematographer_shot_designer`: Directs camera lenses (24mm/35mm/50mm/85mm), rigs, 180° eyelines, and physical optics for an action beat.
+* `soundstage_master`: Directs dialogue synthesis, diegetic room tone beds, physical acoustic convolution, and audio multiplexing.
 
 `film_show` takes no arguments — it always shows the active film. The other film-scoped tools (`asset_register`, `shot_create`, `shot_update`, `shot_show`, `sequence_lock_geo`, and the image/video-lane tools) accept an optional `film_id`; omit it and the active film is used (a clear `NOT_FOUND` refusal tells you to set one if there is none).
 

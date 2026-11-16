@@ -10,6 +10,7 @@ import { registerAudioTools } from './tools/audio.js';
 import { registerStagingTools } from './tools/staging.js';
 import { registerStoryboardTools } from './tools/storyboard.js';
 import { registerEditorTools } from './tools/editor.js';
+import { registerFilmmakerPrompts } from './prompts/filmmaker.js';
 import { startHttpServer } from './http.js';
 
 export function buildServer(opts: { studioRoot: string }): McpServer {
@@ -21,6 +22,7 @@ export function buildServer(opts: { studioRoot: string }): McpServer {
   registerStagingTools(server, opts.studioRoot);
   registerStoryboardTools(server, opts.studioRoot);
   registerEditorTools(server, opts.studioRoot);
+  registerFilmmakerPrompts(server);
   return server;
 }
 

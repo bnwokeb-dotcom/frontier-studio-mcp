@@ -11,7 +11,7 @@ import { studioPaths } from '../store/paths.js';
 import { filmCreate, filmShow, type FilmMeta } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
 import { assetRegister } from '../store/asset.js';
-import { shotCreate, shotUpdate, shotShow, type AudioBlock, type CameraBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
+import { shotCreate, shotUpdate, shotShow, type AudioBlock, type CameraBlock, type CinematicsBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
 import { StudioError, errValidation } from '../errors.js';
 
@@ -85,6 +85,31 @@ function fromWireCamera(c: Record<string, unknown>): CameraBlock {
   return store as unknown as CameraBlock;
 }
 
+function toWireCinematics(c: CinematicsBlock | undefined) {
+  if (!c) return undefined;
+  const w: Record<string, unknown> = {};
+  if (c.filmStock !== undefined) w.film_stock = c.filmStock;
+  if (c.lensGlass !== undefined) w.lens_glass = c.lensGlass;
+  if (c.lightingSetup !== undefined) w.lighting_setup = c.lightingSetup;
+  if (c.colorTemp !== undefined) w.color_temp = c.colorTemp;
+  if (c.atmosphere !== undefined) w.atmosphere = c.atmosphere;
+  return w;
+}
+
+function fromWireCinematics(c: Record<string, unknown>): CinematicsBlock {
+  const store: Record<string, unknown> = {};
+  if ('film_stock' in c) store.filmStock = c.film_stock;
+  if ('filmStock' in c) store.filmStock = c.filmStock;
+  if ('lens_glass' in c) store.lensGlass = c.lens_glass;
+  if ('lensGlass' in c) store.lensGlass = c.lensGlass;
+  if ('lighting_setup' in c) store.lightingSetup = c.lighting_setup;
+  if ('lightingSetup' in c) store.lightingSetup = c.lightingSetup;
+  if ('color_temp' in c) store.colorTemp = c.color_temp;
+  if ('colorTemp' in c) store.colorTemp = c.colorTemp;
+  if ('atmosphere' in c) store.atmosphere = c.atmosphere;
+  return store as unknown as CinematicsBlock;
+}
+
 // R3: emit ONLY the keys present on the wire — absent keys stay absent so a
 // partial patch never persists undefined over stored data.
 const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
@@ -103,7 +128,7 @@ const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
 // be silently skipped or smuggled past the store's checks.
 // audio_block merges ONTO the current record's audioBlock (the store merges
 // shallowly, so without this a partial audio patch would drop stored keys).
-const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'audio_block', 'duration_s', 'action']);
+const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'cinematics', 'audio_block', 'duration_s', 'action']);
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number';
@@ -115,7 +140,7 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   for (const k of Object.keys(patch)) {
     if (!PATCH_KEYS.has(k)) {
       throw errValidation(`unknown patch key "${k}"`,
-        'allowed keys: action, geo_block, refs, camera, audio_block, duration_s, status');
+        'allowed keys: action, geo_block, refs, camera, cinematics, audio_block, duration_s, status');
     }
   }
   if ('status' in patch) p.status = patch.status; // store enforces the status whitelist
@@ -139,6 +164,10 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   if ('camera' in patch) {
     if (!isObj(patch.camera)) throw errValidation('patch.camera must be an object', 'send camera as { lens, move, reason, ... }');
     p.camera = fromWireCamera(patch.camera);
+  }
+  if ('cinematics' in patch) {
+    if (!isObj(patch.cinematics)) throw errValidation('patch.cinematics must be an object', 'send cinematics as { film_stock?, lens_glass?, lighting_setup?, color_temp?, atmosphere? }');
+    p.cinematics = fromWireCinematics(patch.cinematics);
   }
   if ('audio_block' in patch) {
     if (!isObj(patch.audio_block)) throw errValidation('patch.audio_block must be an object', 'send audio_block as { dialogue?, sfx?, music? }');
@@ -176,6 +205,7 @@ function toWireShot(r: ShotRecord) {
     geo_block: r.geoBlock,
     refs: (r.refs ?? []).map(toWireRef),
     camera: toWireCamera(r.camera),
+    ...(r.cinematics !== undefined ? { cinematics: toWireCinematics(r.cinematics) } : {}),
     audio_block: toWireAudio(r.audioBlock),
     duration_s: r.durationS,
     takes: (r.takes ?? []).map((t) => {
@@ -286,6 +316,13 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       eyeline_target: z.string().optional(),
       depth_of_field: z.enum(['deep', 'shallow', 'rack_focus']).optional(),
     }).passthrough().optional(),
+    cinematics: z.object({
+      film_stock: z.string().optional(),
+      lens_glass: z.string().optional(),
+      lighting_setup: z.string().optional(),
+      color_temp: z.string().optional(),
+      atmosphere: z.string().optional(),
+    }).passthrough().optional(),
     audio_block: z.object({
       dialogue: z.array(z.object({ voice_ref: z.string().optional(), line: z.string() })).optional(),
       sfx: z.string().optional(),
@@ -301,13 +338,14 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       geoBlock: a.geo_block ?? '',
       refs: (a.refs ?? []).map(toStoreRef),
       camera: fromWireCamera(a.camera ?? {}),
+      ...(a.cinematics ? { cinematics: fromWireCinematics(a.cinematics) } : {}),
       audioBlock: a.audio_block ? toStoreAudio(a.audio_block) : {},
       durationS: a.duration_s ?? 0,
     });
     return out(toWireShot(record));
   }));
 
-  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: action, status, sequence, geo_block, refs, camera, audio_block, duration_s (id is immutable; unknown keys are refused).', {
+  server.tool('shot_update', 'Patch a shot; patch keys are snake_case: action, status, sequence, geo_block, refs, camera, cinematics, audio_block, duration_s (id is immutable; unknown keys are refused).', {
     film_id: z.string().optional(),
     shot_id: z.string(),
     patch: z.record(z.unknown()),

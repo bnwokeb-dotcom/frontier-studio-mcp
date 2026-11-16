@@ -22,13 +22,14 @@
 //   voiceRef is carried per dialogue line for the caller's ref resolution;
 //   the layout's per-line identity is the (S<i+1>) index only.
 import { errValidation } from '../errors.js';
-import type { CameraBlock } from '../store/shot.js';
+import type { CameraBlock, CinematicsBlock } from '../store/shot.js';
 
 export interface H3DialogueLine { voiceRef: string; voiceDescriptor: string; line: string }
 
 export interface H3PromptParts {
   action: string; // injected verbatim — the picture beat, never trimmed
   camera: CameraBlock; // { lens, move, reason } from the stored shot
+  cinematics?: CinematicsBlock;
   geoBlock?: string; // the sequence's locked geo block, verbatim; line omitted when absent
   dialogue: H3DialogueLine[];
   sfx?: string; // verbatim; 'room tone;' alone when absent
@@ -65,6 +66,18 @@ export function composeH3Prompt(parts: H3PromptParts): string {
   const rig = parts.camera.rig ? `[${parts.camera.rig}] ` : '';
   const dof = parts.camera.depthOfField ? `, ${parts.camera.depthOfField.replace(/_/g, ' ')} depth of field` : '';
   lines.push(`Camera: The camera ${rig}${parts.camera.move}, with ${amplitude} at ${speed}${dof} — ${parts.camera.reason}.`);
+  if (parts.cinematics) {
+    const c = parts.cinematics;
+    const details: string[] = [];
+    if (c.filmStock) details.push(`Stock: ${c.filmStock.replace(/_/g, ' ')}`);
+    if (c.lensGlass) details.push(`Optics: ${c.lensGlass.replace(/_/g, ' ')}`);
+    if (c.lightingSetup) details.push(`Lighting: ${c.lightingSetup.replace(/_/g, ' ')}`);
+    if (c.colorTemp) details.push(`Color temperature: ${c.colorTemp.replace(/_/g, ' ')}`);
+    if (c.atmosphere) details.push(`Atmosphere: ${c.atmosphere.replace(/_/g, ' ')}`);
+    if (details.length > 0) {
+      lines.push(`Cinematic Physics: ${details.join('; ')}.`);
+    }
+  }
   parts.dialogue.forEach((d, i) => {
     lines.push(`(S${i + 1}) — ${d.voiceDescriptor} says: <d>[English]${d.line}</d>`);
   });

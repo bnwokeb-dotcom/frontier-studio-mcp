@@ -287,6 +287,7 @@ async function submitShotRender(opts: {
   const prompt = composeH3Prompt({
     action: shot.action,
     camera: shot.camera,
+    cinematics: shot.cinematics,
     geoBlock,
     dialogue,
     sfx: shot.audioBlock.sfx,

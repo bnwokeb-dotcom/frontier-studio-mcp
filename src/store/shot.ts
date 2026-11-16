@@ -17,6 +17,51 @@ export interface CameraBlock {
   eyelineTarget?: string;
   depthOfField?: 'deep' | 'shallow' | 'rack_focus';
 }
+
+export type FilmStock =
+  | 'kodak_vision3_500t'
+  | 'arri_alexa35_logc4'
+  | 'fuji_eterna'
+  | 'panavision_35mm'
+  | 'tri_x_black_and_white'
+  | 'cinestill_800t';
+
+export type LensGlass =
+  | 'anamorphic_2x_oval_bokeh'
+  | 'cooke_speed_panchro'
+  | 'zeiss_master_prime'
+  | 'leica_summilux'
+  | 'vintage_super16';
+
+export type LightingSetup =
+  | 'key_fill_4_to_1'
+  | 'key_fill_2_to_1'
+  | 'chiaroscuro_high_contrast'
+  | 'rembrandt'
+  | 'high_key_soft';
+
+export type ColorTemperature =
+  | 'tungsten_3200k'
+  | 'golden_hour_2800k'
+  | 'daylight_5600k'
+  | 'overcast_6500k'
+  | 'neon_mixed';
+
+export type AtmosphereHaze =
+  | 'clean_air'
+  | 'subtle_volumetric_haze'
+  | 'heavy_fog'
+  | 'dust_particulates'
+  | 'rain_splatter';
+
+export interface CinematicsBlock {
+  filmStock?: FilmStock;
+  lensGlass?: LensGlass;
+  lightingSetup?: LightingSetup;
+  colorTemp?: ColorTemperature;
+  atmosphere?: AtmosphereHaze;
+}
+
 export interface DialogueLine { voiceRef?: string; line: string }
 export interface AudioBlock { dialogue?: DialogueLine[]; sfx?: string; music?: 'none' }
 export interface TakeEntry { jobId: string; verdict: 'pending' | 'kept' | 'rejected'; costUsd?: number; notes?: string }
@@ -25,7 +70,9 @@ export interface ShotRecord {
   id: string; sequence: string;
   status: 'draft' | 'rendering' | 'kept' | 'rejected';
   action: string; // schema v2 (M3): the picture beat H3's [Shot N] block renders
-  geoBlock: string; refs: ShotRef[]; camera: CameraBlock; audioBlock: AudioBlock;
+  geoBlock: string; refs: ShotRef[]; camera: CameraBlock;
+  cinematics?: CinematicsBlock;
+  audioBlock: AudioBlock;
   durationS: number; takes: TakeEntry[];
 }
 
@@ -36,7 +83,7 @@ const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend 
 const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
 
 function validate(input: {
-  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; durationS?: number; audioBlock?: AudioBlock;
+  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; cinematics?: CinematicsBlock; durationS?: number; audioBlock?: AudioBlock;
 }): void {
   if (input.status !== undefined && !STATUSES.includes(input.status)) {
     throw errValidation(`invalid status "${input.status}"`, 'use draft|rendering|kept|rejected');
@@ -70,6 +117,24 @@ function validate(input: {
   }
   if (c.depthOfField !== undefined && !['deep', 'shallow', 'rack_focus'].includes(c.depthOfField)) {
     throw errValidation(`invalid camera.depth_of_field "${c.depthOfField}"`, 'allowed depth_of_field: deep, shallow, rack_focus');
+  }
+  if (input.cinematics !== undefined) {
+    const cin = input.cinematics;
+    if (cin.filmStock !== undefined && !['kodak_vision3_500t', 'arri_alexa35_logc4', 'fuji_eterna', 'panavision_35mm', 'tri_x_black_and_white', 'cinestill_800t'].includes(cin.filmStock)) {
+      throw errValidation(`invalid cinematics.film_stock "${cin.filmStock}"`, 'allowed film_stock: kodak_vision3_500t, arri_alexa35_logc4, fuji_eterna, panavision_35mm, tri_x_black_and_white, cinestill_800t');
+    }
+    if (cin.lensGlass !== undefined && !['anamorphic_2x_oval_bokeh', 'cooke_speed_panchro', 'zeiss_master_prime', 'leica_summilux', 'vintage_super16'].includes(cin.lensGlass)) {
+      throw errValidation(`invalid cinematics.lens_glass "${cin.lensGlass}"`, 'allowed lens_glass: anamorphic_2x_oval_bokeh, cooke_speed_panchro, zeiss_master_prime, leica_summilux, vintage_super16');
+    }
+    if (cin.lightingSetup !== undefined && !['key_fill_4_to_1', 'key_fill_2_to_1', 'chiaroscuro_high_contrast', 'rembrandt', 'high_key_soft'].includes(cin.lightingSetup)) {
+      throw errValidation(`invalid cinematics.lighting_setup "${cin.lightingSetup}"`, 'allowed lighting_setup: key_fill_4_to_1, key_fill_2_to_1, chiaroscuro_high_contrast, rembrandt, high_key_soft');
+    }
+    if (cin.colorTemp !== undefined && !['tungsten_3200k', 'golden_hour_2800k', 'daylight_5600k', 'overcast_6500k', 'neon_mixed'].includes(cin.colorTemp)) {
+      throw errValidation(`invalid cinematics.color_temp "${cin.colorTemp}"`, 'allowed color_temp: tungsten_3200k, golden_hour_2800k, daylight_5600k, overcast_6500k, neon_mixed');
+    }
+    if (cin.atmosphere !== undefined && !['clean_air', 'subtle_volumetric_haze', 'heavy_fog', 'dust_particulates', 'rain_splatter'].includes(cin.atmosphere)) {
+      throw errValidation(`invalid cinematics.atmosphere "${cin.atmosphere}"`, 'allowed atmosphere: clean_air, subtle_volumetric_haze, heavy_fog, dust_particulates, rain_splatter');
+    }
   }
   if (input.durationS === undefined || input.durationS <= 0 || input.durationS > MAX_TAKE_S) {
     throw errValidation(`duration_s must be 1–${MAX_TAKE_S}`,
@@ -138,7 +203,7 @@ export function validateEyelineContinuity(current: ShotRecord, previous?: ShotRe
 
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   id: string; sequence: string; action: string; geoBlock: string; refs: ShotRef[];
-  camera: CameraBlock; audioBlock: AudioBlock; durationS: number;
+  camera: CameraBlock; cinematics?: CinematicsBlock; audioBlock: AudioBlock; durationS: number;
 }): Promise<ShotRecord> {
   assertId(input.id, 'shot');
   assertId(input.sequence, 'sequence'); // the ID law applies to sequence ids too
@@ -175,6 +240,7 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
     id: input.id, sequence: input.sequence, status: 'draft',
     action: input.action, // stored verbatim — the composer injects it byte-for-byte
     geoBlock: input.geoBlock, refs: input.refs, camera: input.camera,
+    ...(input.cinematics ? { cinematics: input.cinematics } : {}),
     audioBlock: input.audioBlock ?? {}, durationS: input.durationS, takes: [],
   };
   await writeJsonAtomic(paths.shotPath(filmId, input.id), record);

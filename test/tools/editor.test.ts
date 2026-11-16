@@ -116,4 +116,67 @@ describe('Editor Tools (FCPXML, EDL & FFmpeg Assembly)', () => {
     expect(manifestText).toContain('file \'');
     expect(manifestText).toContain('seq01-shot01');
   });
+
+  it('film_grade builds FFmpeg 35mm grain, era emulation, and letterbox filter pipeline', async () => {
+    const res = await client.callTool({
+      name: 'film_grade',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        era: '1970s_panavision',
+        grain: 'medium',
+        aspect_ratio: '2.39_anamorphic',
+        apply: false,
+      },
+    });
+
+    const content = (res as { content: Array<{ text: string }> }).content[0].text;
+    const data = JSON.parse(content);
+
+    expect(data.shot_id).toBe('seq01-shot01');
+    expect(data.era).toBe('1970s_panavision');
+    expect(data.grain).toBe('medium');
+    expect(data.aspect_ratio).toBe('2.39_anamorphic');
+    expect(data.filter_complex).toContain('eq=contrast=1.08');
+    expect(data.filter_complex).toContain('noise=alls=12:allf=t+u');
+    expect(data.filter_complex).toContain('drawbox=y=0:h=(ih-iw/2.39)/2');
+    expect(data.ffmpeg_command).toContain('ffmpeg -y -i');
+  });
+
+  it('shot_lipsync validates dialogue audio presence and generates audio-video sync command', async () => {
+    // Calling shot_lipsync without dialogue audio must refuse
+    const errRes = await client.callTool({
+      name: 'shot_lipsync',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+      },
+    });
+    expect((errRes as { isError?: boolean }).isError).toBe(true);
+
+    // Create dialogue audio stem for seq01-shot01
+    const { writeFile, mkdir } = await import('node:fs/promises');
+    const { studioPaths } = await import('../../src/store/paths.js');
+    const paths = studioPaths(root);
+    await mkdir(paths.audioDir('film_edit'), { recursive: true });
+    await writeFile(paths.audioPath('film_edit', 'seq01-shot01.wav'), Buffer.from('RIFF mock wav bytes'));
+
+    const res = await client.callTool({
+      name: 'shot_lipsync',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        apply: false,
+      },
+    });
+
+    const content = (res as { content: Array<{ text: string }> }).content[0].text;
+    const data = JSON.parse(content);
+
+    expect(data.shot_id).toBe('seq01-shot01');
+    expect(data.engine).toBe('ffmpeg_mux');
+    expect(data.audio_stem).toContain('seq01-shot01.wav');
+    expect(data.ffmpeg_command).toContain('ffmpeg -y -i');
+    expect(data.ffmpeg_command).toContain('-c:v copy -c:a aac');
+  });
 });

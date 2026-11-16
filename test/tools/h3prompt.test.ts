@@ -164,4 +164,17 @@ describe('composeH3Prompt (the doctrine-native H3 layout)', () => {
       expect(p).not.toContain(token);
     }
   });
+
+  it('interpolates cinematics block into prompt when present', () => {
+    const p = composeH3Prompt(parts({
+      cinematics: {
+        filmStock: 'kodak_vision3_500t',
+        lensGlass: 'anamorphic_2x_oval_bokeh',
+        lightingSetup: 'key_fill_4_to_1',
+        colorTemp: 'daylight_5600k',
+        atmosphere: 'subtle_volumetric_haze',
+      },
+    }));
+    expect(p).toContain('Cinematic Physics: Stock: kodak vision3 500t; Optics: anamorphic 2x oval bokeh; Lighting: key fill 4 to 1; Color temperature: daylight 5600k; Atmosphere: subtle volumetric haze.');
+  });
 });

@@ -348,4 +348,38 @@ describe('shot store law: interpolated fields are single-line (the layout is the
     });
     expect(s2.camera.screenDirection).toBe('screen_right');
   });
+
+  it('accepts valid cinematics block (film stock, optics, lighting ratio, color temp, atmosphere)', async () => {
+    const s = await shotCreate(paths, 'film_t', {
+      ...goodShot,
+      id: 'seq01-shot23',
+      cinematics: {
+        filmStock: 'kodak_vision3_500t',
+        lensGlass: 'anamorphic_2x_oval_bokeh',
+        lightingSetup: 'key_fill_4_to_1',
+        colorTemp: 'daylight_5600k',
+        atmosphere: 'subtle_volumetric_haze',
+      },
+    });
+    expect(s.cinematics?.filmStock).toBe('kodak_vision3_500t');
+    expect(s.cinematics?.lensGlass).toBe('anamorphic_2x_oval_bokeh');
+    expect(s.cinematics?.lightingSetup).toBe('key_fill_4_to_1');
+    expect(s.cinematics?.colorTemp).toBe('daylight_5600k');
+    expect(s.cinematics?.atmosphere).toBe('subtle_volumetric_haze');
+  });
+
+  it('refuses invalid cinematics values with structured validation error', async () => {
+    await expect(
+      shotCreate(paths, 'film_t', {
+        ...goodShot,
+        id: 'seq01-shot24',
+        cinematics: {
+          filmStock: 'fake_stock_instagram' as any,
+        },
+      }),
+    ).rejects.toMatchObject({
+      code: 'VALIDATION',
+      message: expect.stringContaining('invalid cinematics.film_stock'),
+    });
+  });
 });
