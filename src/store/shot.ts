@@ -38,7 +38,10 @@ export type LightingSetup =
   | 'key_fill_2_to_1'
   | 'chiaroscuro_high_contrast'
   | 'rembrandt'
-  | 'high_key_soft';
+  | 'high_key_soft'
+  | 'commercial_high_key'
+  | 'packshot_rim_light'
+  | 'beauty_softbox';
 
 export type ColorTemperature =
   | 'tungsten_3200k'
@@ -74,6 +77,7 @@ export interface ShotRecord {
   action: string; // schema v2 (M3): the picture beat H3's [Shot N] block renders
   geoBlock: string; refs: ShotRef[]; camera: CameraBlock;
   cinematics?: CinematicsBlock;
+  aspectRatio?: '16:9' | '9:16' | '1:1' | '21:9' | '4:3' | '3:4';
   continuity?: ContinuityType;
   chainFromShotId?: string;
   audioBlock: AudioBlock;
@@ -87,8 +91,11 @@ const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend 
 const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
 
 function validate(input: {
-  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; cinematics?: CinematicsBlock; continuity?: ContinuityType; chainFromShotId?: string; durationS?: number; audioBlock?: AudioBlock;
+  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; cinematics?: CinematicsBlock; aspectRatio?: string; continuity?: ContinuityType; chainFromShotId?: string; durationS?: number; audioBlock?: AudioBlock;
 }): void {
+  if (input.aspectRatio !== undefined && !['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'].includes(input.aspectRatio)) {
+    throw errValidation(`invalid aspect_ratio "${input.aspectRatio}"`, 'allowed aspect_ratio: 16:9, 9:16, 1:1, 21:9, 4:3, 3:4');
+  }
   if (input.continuity !== undefined && !['cut', 'continuous', 'match_cut', 'transition'].includes(input.continuity)) {
     throw errValidation(`invalid continuity "${input.continuity}"`, 'allowed continuity: cut, continuous, match_cut, transition');
   }
@@ -133,8 +140,8 @@ function validate(input: {
     if (cin.lensGlass !== undefined && !['anamorphic_2x_oval_bokeh', 'cooke_speed_panchro', 'zeiss_master_prime', 'leica_summilux', 'vintage_super16'].includes(cin.lensGlass)) {
       throw errValidation(`invalid cinematics.lens_glass "${cin.lensGlass}"`, 'allowed lens_glass: anamorphic_2x_oval_bokeh, cooke_speed_panchro, zeiss_master_prime, leica_summilux, vintage_super16');
     }
-    if (cin.lightingSetup !== undefined && !['key_fill_4_to_1', 'key_fill_2_to_1', 'chiaroscuro_high_contrast', 'rembrandt', 'high_key_soft'].includes(cin.lightingSetup)) {
-      throw errValidation(`invalid cinematics.lighting_setup "${cin.lightingSetup}"`, 'allowed lighting_setup: key_fill_4_to_1, key_fill_2_to_1, chiaroscuro_high_contrast, rembrandt, high_key_soft');
+    if (cin.lightingSetup !== undefined && !['key_fill_4_to_1', 'key_fill_2_to_1', 'chiaroscuro_high_contrast', 'rembrandt', 'high_key_soft', 'commercial_high_key', 'packshot_rim_light', 'beauty_softbox'].includes(cin.lightingSetup)) {
+      throw errValidation(`invalid cinematics.lighting_setup "${cin.lightingSetup}"`, 'allowed lighting_setup: key_fill_4_to_1, key_fill_2_to_1, chiaroscuro_high_contrast, rembrandt, high_key_soft, commercial_high_key, packshot_rim_light, beauty_softbox');
     }
     if (cin.colorTemp !== undefined && !['tungsten_3200k', 'golden_hour_2800k', 'daylight_5600k', 'overcast_6500k', 'neon_mixed'].includes(cin.colorTemp)) {
       throw errValidation(`invalid cinematics.color_temp "${cin.colorTemp}"`, 'allowed color_temp: tungsten_3200k, golden_hour_2800k, daylight_5600k, overcast_6500k, neon_mixed');
@@ -210,7 +217,7 @@ export function validateEyelineContinuity(current: ShotRecord, previous?: ShotRe
 
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   id: string; sequence: string; action: string; geoBlock: string; refs: ShotRef[];
-  camera: CameraBlock; cinematics?: CinematicsBlock; continuity?: ContinuityType; chainFromShotId?: string; audioBlock: AudioBlock; durationS: number;
+  camera: CameraBlock; cinematics?: CinematicsBlock; aspectRatio?: '16:9' | '9:16' | '1:1' | '21:9' | '4:3' | '3:4'; continuity?: ContinuityType; chainFromShotId?: string; audioBlock: AudioBlock; durationS: number;
 }): Promise<ShotRecord> {
   assertId(input.id, 'shot');
   assertId(input.sequence, 'sequence'); // the ID law applies to sequence ids too
@@ -248,6 +255,7 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
     action: input.action, // stored verbatim — the composer injects it byte-for-byte
     geoBlock: input.geoBlock, refs: input.refs, camera: input.camera,
     ...(input.cinematics ? { cinematics: input.cinematics } : {}),
+    ...(input.aspectRatio ? { aspectRatio: input.aspectRatio } : {}),
     ...(input.continuity ? { continuity: input.continuity } : {}),
     ...(input.chainFromShotId ? { chainFromShotId: input.chainFromShotId } : {}),
     audioBlock: input.audioBlock ?? {}, durationS: input.durationS, takes: [],

@@ -202,6 +202,7 @@ async function submitShotRender(opts: {
   tool: string; // ledger tool name: 'render_shot' | 'repair_shot'
   parentJobId?: string; // repair lineage
   chainFromShotId?: string;
+  aspectRatio?: string;
 }): Promise<{ jobId: string; estimateUsd: number; durationS: number }> {
   const { studioRoot, paths, filmId, shot, quality, tool } = opts;
 
@@ -339,7 +340,7 @@ async function submitShotRender(opts: {
   const req = {
     prompt,
     durationS: shot.durationS,
-    aspectRatio: '16:9', // the H3 lane's v1 frame — no wire arg by design
+    aspectRatio: opts.aspectRatio ?? shot.aspectRatio ?? '16:9',
     quality,
     firstFrame,
   };
@@ -370,6 +371,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     shot_id: z.string(),
     film_id: z.string().optional(),
     quality: z.enum(['turbo', 'standard', 'max', 'ultra']).optional(),
+    aspect_ratio: z.enum(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']).optional(),
     chain_from_shot_id: z.string().optional(),
   }, async (a) => guard(async () => {
     // 1. args
@@ -394,6 +396,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       quality: a.quality ?? ('standard' as const),
       tool: 'render_shot',
       chainFromShotId: a.chain_from_shot_id,
+      aspectRatio: a.aspect_ratio,
     });
 
     // 9. snake_case wire output

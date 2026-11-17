@@ -128,7 +128,7 @@ const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
 // be silently skipped or smuggled past the store's checks.
 // audio_block merges ONTO the current record's audioBlock (the store merges
 // shallowly, so without this a partial audio patch would drop stored keys).
-const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'cinematics', 'continuity', 'chain_from_shot_id', 'audio_block', 'duration_s', 'action']);
+const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'cinematics', 'aspect_ratio', 'continuity', 'chain_from_shot_id', 'audio_block', 'duration_s', 'action']);
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number';
@@ -140,7 +140,7 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   for (const k of Object.keys(patch)) {
     if (!PATCH_KEYS.has(k)) {
       throw errValidation(`unknown patch key "${k}"`,
-        'allowed keys: action, geo_block, refs, camera, cinematics, continuity, chain_from_shot_id, audio_block, duration_s, status');
+        'allowed keys: action, geo_block, refs, camera, cinematics, aspect_ratio, continuity, chain_from_shot_id, audio_block, duration_s, status');
     }
   }
   if ('status' in patch) p.status = patch.status; // store enforces the status whitelist
@@ -168,6 +168,12 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   if ('cinematics' in patch) {
     if (!isObj(patch.cinematics)) throw errValidation('patch.cinematics must be an object', 'send cinematics as { film_stock?, lens_glass?, lighting_setup?, color_temp?, atmosphere? }');
     p.cinematics = fromWireCinematics(patch.cinematics);
+  }
+  if ('aspect_ratio' in patch) {
+    if (!isStr(patch.aspect_ratio) || !['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'].includes(patch.aspect_ratio)) {
+      throw errValidation('patch.aspect_ratio must be 16:9|9:16|1:1|21:9|4:3|3:4', 'specify supported aspect ratio');
+    }
+    p.aspectRatio = patch.aspect_ratio as any;
   }
   if ('continuity' in patch) {
     if (!isStr(patch.continuity) || !['cut', 'continuous', 'match_cut', 'transition'].includes(patch.continuity)) {
@@ -218,6 +224,7 @@ function toWireShot(r: ShotRecord) {
     refs: (r.refs ?? []).map(toWireRef),
     camera: toWireCamera(r.camera),
     ...(r.cinematics !== undefined ? { cinematics: toWireCinematics(r.cinematics) } : {}),
+    ...(r.aspectRatio !== undefined ? { aspect_ratio: r.aspectRatio } : {}),
     ...(r.continuity !== undefined ? { continuity: r.continuity } : {}),
     ...(r.chainFromShotId !== undefined ? { chain_from_shot_id: r.chainFromShotId } : {}),
     audio_block: toWireAudio(r.audioBlock),
@@ -337,6 +344,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       color_temp: z.string().optional(),
       atmosphere: z.string().optional(),
     }).passthrough().optional(),
+    aspect_ratio: z.enum(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']).optional(),
     continuity: z.enum(['cut', 'continuous', 'match_cut', 'transition']).optional(),
     chain_from_shot_id: z.string().optional(),
     audio_block: z.object({
@@ -355,6 +363,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       refs: (a.refs ?? []).map(toStoreRef),
       camera: fromWireCamera(a.camera ?? {}),
       ...(a.cinematics ? { cinematics: fromWireCinematics(a.cinematics) } : {}),
+      ...(a.aspect_ratio ? { aspectRatio: a.aspect_ratio } : {}),
       ...(a.continuity ? { continuity: a.continuity } : {}),
       ...(a.chain_from_shot_id ? { chainFromShotId: a.chain_from_shot_id } : {}),
       audioBlock: a.audio_block ? toStoreAudio(a.audio_block) : {},

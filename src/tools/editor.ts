@@ -208,10 +208,10 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
     {
       film_id: z.string().optional(),
       shot_id: z.string(),
-      era: z.enum(['1920s_silent', '1940s_film_noir', '1970s_panavision', '1980s_vhs', '1990s_indie', 'contemporary']).optional(),
+      era: z.enum(['1920s_silent', '1940s_film_noir', '1970s_panavision', '1980s_vhs', '1990s_indie', 'contemporary', 'commercial_ad']).optional(),
       film_stock: z.enum(['kodak_vision3_500t', 'arri_alexa35_logc4', 'fuji_eterna', 'bleach_bypass', 'tri_x_35mm']).optional(),
       grain: z.enum(['none', 'subtle', 'medium', 'heavy']).optional(),
-      aspect_ratio: z.enum(['2.39_anamorphic', '1.85_theatrical', '1.33_academy', '16_9_native']).optional(),
+      aspect_ratio: z.enum(['2.39_anamorphic', '1.85_theatrical', '1.33_academy', '16_9_native', '9_16_vertical']).optional(),
       apply: z.boolean().optional(),
     },
     async (a) =>
@@ -245,6 +245,8 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           filters.push('eq=contrast=1.1:saturation=1.2');
         } else if (era === '1990s_indie') {
           filters.push('eq=contrast=1.05:saturation=0.98,colorbalance=bs=0.03:gs=0.01:rs=-0.02');
+        } else if (era === 'commercial_ad') {
+          filters.push('eq=contrast=1.12:brightness=0.02:saturation=1.25,unsharp=5:5:0.8:3:3:0.4');
         } else {
           // Contemporary / Stock-specific
           const stock = a.film_stock ?? 'kodak_vision3_500t';
@@ -275,6 +277,8 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           filters.push('drawbox=y=0:h=(ih-iw/1.85)/2:c=black:t=fill,drawbox=y=ih-(ih-iw/1.85)/2:h=(ih-iw/1.85)/2:c=black:t=fill');
         } else if (ratio === '1.33_academy') {
           filters.push('drawbox=x=0:w=(iw-ih*1.33)/2:c=black:t=fill,drawbox=x=iw-(iw-ih*1.33)/2:w=(iw-ih*1.33)/2:c=black:t=fill');
+        } else if (ratio === '9_16_vertical') {
+          filters.push('crop=ih*(9/16):ih');
         }
 
         const filterComplex = filters.join(',');

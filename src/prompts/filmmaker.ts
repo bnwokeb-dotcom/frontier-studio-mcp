@@ -127,4 +127,48 @@ ACOUSTIC PROTOCOL:
       };
     },
   );
+
+  // 4. Commercial Ad Architect (Topview AI / High-Converting Video Ad Standard)
+  server.prompt(
+    'commercial_ad_architect',
+    'Architects high-converting, Topview AI-grade commercial video ads for TikTok, Instagram Reels, and YouTube with hook pacing, packshot lighting, and viral retention structure.',
+    {
+      product_name: z.string().describe('The name of the product or brand'),
+      product_category: z.string().describe('Category (e.g. tech_gadget, beauty_skincare, apparel, fmcg, saas_app)'),
+      ad_format: z.enum(['tiktok_reels_9_16', 'youtube_16_9', 'instagram_1_1']).describe('Target video ad aspect ratio'),
+      hook_type: z.enum(['problem_agitator', 'visual_spectacle', 'before_after', 'curiosity_gap', 'unboxing_satisfying']).describe('Hook mechanism for first 3 seconds'),
+      target_audience: z.string().optional().describe('Target demographic / psychographic audience'),
+    },
+    async (args) => {
+      const ratio = args.ad_format === 'tiktok_reels_9_16' ? '9:16' : args.ad_format === 'instagram_1_1' ? '1:1' : '16:9';
+      return {
+        description: 'Topview AI-Grade Commercial Video Ad Blueprint',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are the Commercial Creative Director designing a high-converting video ad for "${args.product_name}" (${args.product_category}).
+Aspect Ratio: ${ratio} | Hook Strategy: ${args.hook_type} | Target Audience: ${args.target_audience ?? 'General Consumers'}
+
+COMMERCIAL AD PRODUCTION PROTOCOL:
+1. PRODUCT ASSET REGISTRATION:
+   - Call \`asset_register\` with kind: 'prop' and assetId: 'prop_product'. Write the physical descriptor with macro packaging details, material finish (matte, brushed aluminum, glossy glass), and exact brand branding.
+   - Call \`keyframe_build\` with lighting: 'packshot_rim_light' or 'commercial_high_key' to anchor product photorealism.
+2. 5-BEAT HIGH-RETENTION AD STRUCTURE:
+   - BEAT 1 (0–3s, The Hook): Immediate visual pattern interrupt using hook_type: "${args.hook_type}". Fast camera motion (e.g. camera.movement: 'dolly_in', duration: 4s). Aspect ratio: "${ratio}".
+   - BEAT 2 (3–8s, The Agitation / Pain Point): UGC creator or relatable character reacting to the frustration. Call \`shot_create\` with camera.framing: 'close_up', aspect_ratio: "${ratio}".
+   - BEAT 3 (8–14s, Product Hero Demonstration): Macro rotating hero shot of "${args.product_name}". Call \`shot_create\` with lighting_setup: 'packshot_rim_light', camera.movement: 'orbit_180', aspect_ratio: "${ratio}".
+   - BEAT 4 (14–20s, The Transformation / Social Proof): Immediate visible benefit or glowing customer satisfaction beat.
+   - BEAT 5 (20–25s, The Call-To-Action): Clean hero packshot with kinetic offer text / promo code reminder.
+3. BATCH & PARALLEL PRODUCTION:
+   - Enforce aspect_ratio: "${ratio}" across all shot_create calls.
+   - Execute parallel cluster rendering via \`npm run render:parallel\` to render all beats across Vultr in ~90 seconds.
+   - Grade with \`film_grade\` (era: 'commercial_ad', aspect_ratio: '${ratio === '9:16' ? '9_16_vertical' : '16_9_native'}') for vibrant, punchy commercial finish.`,
+            },
+          },
+        ],
+      };
+    },
+  );
 }
