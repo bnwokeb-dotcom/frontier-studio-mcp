@@ -12,7 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
     "dev": "tsx src/server.ts",
-    "push": "node scripts/github-push.mjs"
+    "push": "node scripts/github-push.mjs",
+    "render:parallel": "node scripts/render-parallel.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
