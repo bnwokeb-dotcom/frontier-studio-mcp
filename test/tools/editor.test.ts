@@ -179,4 +179,41 @@ describe('Editor Tools (FCPXML, EDL & FFmpeg Assembly)', () => {
     expect(data.ffmpeg_command).toContain('ffmpeg -y -i');
     expect(data.ffmpeg_command).toContain('-c:v copy -c:a aac');
   });
+
+  it('shot_continuity_plan advises on continuous motion vs cut point', async () => {
+    // seq01-shot01 is tracking in; create seq01-shot02 as continuous tracking in
+    await client.callTool({
+      name: 'shot_create',
+      arguments: {
+        id: 'seq01-shot03',
+        sequence: 'seq01',
+        action: 'Mara approaches the fireplace.',
+        geo_block: 'hearth on left, door on right',
+        refs: [{ asset_id: 'loc_cabin', role: 'location' }],
+        camera: { lens: '35mm', move: 'dolly_in', movement: 'dolly_in', framing: 'medium_ots', reason: 'continuing push' },
+        continuity: 'continuous',
+        chain_from_shot_id: 'seq01-shot01',
+        duration_s: 4,
+      },
+    });
+
+    const res = await client.callTool({
+      name: 'shot_continuity_plan',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        target_shot_id: 'seq01-shot03',
+      },
+    });
+
+    const content = (res as { content: Array<{ text: string }> }).content[0].text;
+    const data = JSON.parse(content);
+
+    expect(data.source_shot).toBe('seq01-shot01');
+    expect(data.target_shot).toBe('seq01-shot03');
+    expect(data.recommended_transition).toBe('continuous');
+    expect(data.frame_strategy).toBe('CHAIN_TAIL_FRAME');
+    expect(data.chain_parent_id).toBe('seq01-shot01');
+    expect(data.directorial_directive).toContain('AUTOMATED CONTINUITY');
+  });
 });

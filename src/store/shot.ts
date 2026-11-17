@@ -62,6 +62,8 @@ export interface CinematicsBlock {
   atmosphere?: AtmosphereHaze;
 }
 
+export type ContinuityType = 'cut' | 'continuous' | 'match_cut' | 'transition';
+
 export interface DialogueLine { voiceRef?: string; line: string }
 export interface AudioBlock { dialogue?: DialogueLine[]; sfx?: string; music?: 'none' }
 export interface TakeEntry { jobId: string; verdict: 'pending' | 'kept' | 'rejected'; costUsd?: number; notes?: string }
@@ -72,6 +74,8 @@ export interface ShotRecord {
   action: string; // schema v2 (M3): the picture beat H3's [Shot N] block renders
   geoBlock: string; refs: ShotRef[]; camera: CameraBlock;
   cinematics?: CinematicsBlock;
+  continuity?: ContinuityType;
+  chainFromShotId?: string;
   audioBlock: AudioBlock;
   durationS: number; takes: TakeEntry[];
 }
@@ -83,8 +87,11 @@ const MAX_TAKE_S = 30; // single-take ceiling; longer = chain via repair/extend 
 const STATUSES: readonly string[] = ['draft', 'rendering', 'kept', 'rejected'];
 
 function validate(input: {
-  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; cinematics?: CinematicsBlock; durationS?: number; audioBlock?: AudioBlock;
+  status?: string; action?: string; geoBlock?: string; refs?: ShotRef[]; camera?: Partial<CameraBlock>; cinematics?: CinematicsBlock; continuity?: ContinuityType; chainFromShotId?: string; durationS?: number; audioBlock?: AudioBlock;
 }): void {
+  if (input.continuity !== undefined && !['cut', 'continuous', 'match_cut', 'transition'].includes(input.continuity)) {
+    throw errValidation(`invalid continuity "${input.continuity}"`, 'allowed continuity: cut, continuous, match_cut, transition');
+  }
   if (input.status !== undefined && !STATUSES.includes(input.status)) {
     throw errValidation(`invalid status "${input.status}"`, 'use draft|rendering|kept|rejected');
   }
@@ -203,7 +210,7 @@ export function validateEyelineContinuity(current: ShotRecord, previous?: ShotRe
 
 export async function shotCreate(paths: StudioPaths, filmId: string, input: {
   id: string; sequence: string; action: string; geoBlock: string; refs: ShotRef[];
-  camera: CameraBlock; cinematics?: CinematicsBlock; audioBlock: AudioBlock; durationS: number;
+  camera: CameraBlock; cinematics?: CinematicsBlock; continuity?: ContinuityType; chainFromShotId?: string; audioBlock: AudioBlock; durationS: number;
 }): Promise<ShotRecord> {
   assertId(input.id, 'shot');
   assertId(input.sequence, 'sequence'); // the ID law applies to sequence ids too
@@ -241,6 +248,8 @@ export async function shotCreate(paths: StudioPaths, filmId: string, input: {
     action: input.action, // stored verbatim — the composer injects it byte-for-byte
     geoBlock: input.geoBlock, refs: input.refs, camera: input.camera,
     ...(input.cinematics ? { cinematics: input.cinematics } : {}),
+    ...(input.continuity ? { continuity: input.continuity } : {}),
+    ...(input.chainFromShotId ? { chainFromShotId: input.chainFromShotId } : {}),
     audioBlock: input.audioBlock ?? {}, durationS: input.durationS, takes: [],
   };
   await writeJsonAtomic(paths.shotPath(filmId, input.id), record);

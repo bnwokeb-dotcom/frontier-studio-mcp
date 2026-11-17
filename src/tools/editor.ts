@@ -399,4 +399,93 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         });
       }),
   );
+
+  server.tool(
+    'shot_continuity_plan',
+    'Directorial continuity advisor for LLM agents (ChatGPT, Claude, Hermes). Evaluates camera vectors, framing, 180-degree axis, and physical staging between two shots to recommend whether to CHAIN tail-frames or CUT to staging plates.',
+    {
+      film_id: z.string().optional(),
+      shot_id: z.string(),
+      target_shot_id: z.string().optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        await initStudio(paths);
+        const filmId = a.film_id ?? (await getActiveFilm(paths));
+        if (!filmId) throw errNotFound('no active film set', 'pass film_id or create film');
+        const shotA = await shotShow(paths, filmId, a.shot_id);
+
+        let targetId = a.target_shot_id;
+        if (!targetId) {
+          const shotsDir = paths.shotsDir(filmId);
+          const files = (await readdir(shotsDir)).filter((f) => f.endsWith('.json')).sort();
+          const idx = files.indexOf(`${shotA.id}.json`);
+          if (idx !== -1 && idx + 1 < files.length) {
+            targetId = files[idx + 1].replace(/\.json$/, '');
+          }
+        }
+
+        if (!targetId) {
+          return out({
+            shot_id: shotA.id,
+            note: 'Terminal shot in sequence — no subsequent shot to evaluate.',
+            recommended_transition: 'none',
+            frame_strategy: 'STAGING_PLATE',
+          });
+        }
+
+        const shotB = await shotShow(paths, filmId, targetId);
+
+        // 1. Same location check
+        const locA = shotA.refs.find((r) => r.role === 'location')?.assetId;
+        const locB = shotB.refs.find((r) => r.role === 'location')?.assetId;
+        const sameLocation = Boolean(locA && locB && locA === locB);
+
+        // 2. Continuous vector check
+        const isExplicitContinuous = shotB.continuity === 'continuous' || shotB.chainFromShotId === shotA.id;
+        const sameFraming = Boolean(shotA.camera.framing && shotB.camera.framing && shotA.camera.framing === shotB.camera.framing);
+        const isTracking =
+          ['dolly_in', 'dolly_out', 'truck_left', 'truck_right'].includes(shotA.camera.movement ?? '') &&
+          ['dolly_in', 'dolly_out', 'truck_left', 'truck_right'].includes(shotB.camera.movement ?? '');
+
+        const isContinuous = isExplicitContinuous || (sameLocation && sameFraming && isTracking);
+
+        // 3. Eyeline & 180° Rule check
+        let eyelineStatus = 'aligned';
+        let eyelineNote = '180-degree axis preserved.';
+        if (
+          shotA.camera.screenDirection &&
+          shotB.camera.screenDirection &&
+          shotA.camera.eyelineTarget &&
+          shotB.camera.eyelineTarget &&
+          shotA.camera.eyelineTarget !== shotB.camera.eyelineTarget
+        ) {
+          if (shotA.camera.screenDirection === shotB.camera.screenDirection && shotA.camera.screenDirection !== 'center') {
+            eyelineStatus = 'violation';
+            eyelineNote = `AXIS JUMP: Both actors placed on ${shotA.camera.screenDirection}. Reverse angle should be placed on ${
+              shotA.camera.screenDirection === 'screen_left' ? 'screen_right' : 'screen_left'
+            } to preserve eyeline continuity.`;
+          }
+        }
+
+        const recommendedTransition = isContinuous ? 'continuous' : 'cut';
+        const frameStrategy = recommendedTransition === 'continuous' ? 'CHAIN_TAIL_FRAME' : 'CUT_TO_STAGING_PLATE';
+        const directorialDirective =
+          recommendedTransition === 'continuous'
+            ? `AUTOMATED CONTINUITY: Shot ${shotB.id} continues motion from ${shotA.id}. The engine will automatically extract the tail frame from ${shotA.id} and feed it as first_frame. Zero morphing, continuous momentum.`
+            : `DIRECTORIAL CUT: Camera angle or framing change detected. Do NOT chain tail frames (chaining across cuts causes grotesque pixel warping). Cut cleanly using shot ${shotB.id}'s staging plate with sequence locked geometry.`;
+
+        return out({
+          source_shot: shotA.id,
+          target_shot: shotB.id,
+          same_location: sameLocation,
+          recommended_transition: recommendedTransition,
+          frame_strategy: frameStrategy,
+          eyeline_continuity: eyelineStatus,
+          eyeline_note: eyelineNote,
+          directorial_directive: directorialDirective,
+          chain_parent_id: recommendedTransition === 'continuous' ? shotA.id : null,
+        });
+      }),
+  );
 }

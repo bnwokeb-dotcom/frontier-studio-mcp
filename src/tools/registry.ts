@@ -128,7 +128,7 @@ const toStoreAudio = (b: WireAudioBlock): AudioBlock => {
 // be silently skipped or smuggled past the store's checks.
 // audio_block merges ONTO the current record's audioBlock (the store merges
 // shallowly, so without this a partial audio patch would drop stored keys).
-const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'cinematics', 'audio_block', 'duration_s', 'action']);
+const PATCH_KEYS = new Set(['status', 'sequence', 'geo_block', 'refs', 'camera', 'cinematics', 'continuity', 'chain_from_shot_id', 'audio_block', 'duration_s', 'action']);
 
 const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number';
@@ -140,7 +140,7 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   for (const k of Object.keys(patch)) {
     if (!PATCH_KEYS.has(k)) {
       throw errValidation(`unknown patch key "${k}"`,
-        'allowed keys: action, geo_block, refs, camera, cinematics, audio_block, duration_s, status');
+        'allowed keys: action, geo_block, refs, camera, cinematics, continuity, chain_from_shot_id, audio_block, duration_s, status');
     }
   }
   if ('status' in patch) p.status = patch.status; // store enforces the status whitelist
@@ -168,6 +168,18 @@ function fromWirePatch(patch: Record<string, unknown>, current: ShotRecord): Par
   if ('cinematics' in patch) {
     if (!isObj(patch.cinematics)) throw errValidation('patch.cinematics must be an object', 'send cinematics as { film_stock?, lens_glass?, lighting_setup?, color_temp?, atmosphere? }');
     p.cinematics = fromWireCinematics(patch.cinematics);
+  }
+  if ('continuity' in patch) {
+    if (!isStr(patch.continuity) || !['cut', 'continuous', 'match_cut', 'transition'].includes(patch.continuity)) {
+      throw errValidation('patch.continuity must be cut|continuous|match_cut|transition', 'specify continuity');
+    }
+    p.continuity = patch.continuity as any;
+  }
+  if ('chain_from_shot_id' in patch) {
+    if (patch.chain_from_shot_id !== null && !isStr(patch.chain_from_shot_id)) {
+      throw errValidation('patch.chain_from_shot_id must be a string or null', 'pass parent shot id');
+    }
+    p.chainFromShotId = (patch.chain_from_shot_id as string) ?? undefined;
   }
   if ('audio_block' in patch) {
     if (!isObj(patch.audio_block)) throw errValidation('patch.audio_block must be an object', 'send audio_block as { dialogue?, sfx?, music? }');
@@ -206,6 +218,8 @@ function toWireShot(r: ShotRecord) {
     refs: (r.refs ?? []).map(toWireRef),
     camera: toWireCamera(r.camera),
     ...(r.cinematics !== undefined ? { cinematics: toWireCinematics(r.cinematics) } : {}),
+    ...(r.continuity !== undefined ? { continuity: r.continuity } : {}),
+    ...(r.chainFromShotId !== undefined ? { chain_from_shot_id: r.chainFromShotId } : {}),
     audio_block: toWireAudio(r.audioBlock),
     duration_s: r.durationS,
     takes: (r.takes ?? []).map((t) => {
@@ -323,6 +337,8 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       color_temp: z.string().optional(),
       atmosphere: z.string().optional(),
     }).passthrough().optional(),
+    continuity: z.enum(['cut', 'continuous', 'match_cut', 'transition']).optional(),
+    chain_from_shot_id: z.string().optional(),
     audio_block: z.object({
       dialogue: z.array(z.object({ voice_ref: z.string().optional(), line: z.string() })).optional(),
       sfx: z.string().optional(),
@@ -339,6 +355,8 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       refs: (a.refs ?? []).map(toStoreRef),
       camera: fromWireCamera(a.camera ?? {}),
       ...(a.cinematics ? { cinematics: fromWireCinematics(a.cinematics) } : {}),
+      ...(a.continuity ? { continuity: a.continuity } : {}),
+      ...(a.chain_from_shot_id ? { chainFromShotId: a.chain_from_shot_id } : {}),
       audioBlock: a.audio_block ? toStoreAudio(a.audio_block) : {},
       durationS: a.duration_s ?? 0,
     });

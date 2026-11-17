@@ -39,7 +39,11 @@
 // edits requires a verified request shape first (docs or live probe).
 import { z } from 'zod';
 import { readFile, writeFile } from 'node:fs/promises';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+
+const execFileAsync = promisify(execFileCb);
 import { studioPaths } from '../store/paths.js';
 import type { AssetKindDir, StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
@@ -197,6 +201,7 @@ async function submitShotRender(opts: {
   firstFrame?: { data: Buffer; mimeType: string }; // repair extend — INSTEAD of the plate
   tool: string; // ledger tool name: 'render_shot' | 'repair_shot'
   parentJobId?: string; // repair lineage
+  chainFromShotId?: string;
 }): Promise<{ jobId: string; estimateUsd: number; durationS: number }> {
   const { studioRoot, paths, filmId, shot, quality, tool } = opts;
 
@@ -225,10 +230,43 @@ async function submitShotRender(opts: {
     );
   }
 
-  // 3. the identity carrier: the caller's firstFrame (repair extend), else the
-  //    keyframe plate (digest feature #1 as a schema rule). Characters/props/
-  //    size_refs are skipped — a plate lives in location/style dirs only.
+  // 3. the identity carrier: the caller's firstFrame (repair extend),
+  //    or auto-chain from parent shot's tail frame, else the keyframe plate.
   let firstFrame = opts.firstFrame;
+  const chainId = opts.chainFromShotId || shot.chainFromShotId;
+  if (!firstFrame && (chainId || shot.continuity === 'continuous')) {
+    let resolvedParentId = chainId;
+    if (!resolvedParentId) {
+      try {
+        const { readdir } = await import('node:fs/promises');
+        const files = (await readdir(paths.shotsDir(filmId))).filter((f) => f.endsWith('.json')).sort();
+        const idx = files.indexOf(`${shot.id}.json`);
+        if (idx > 0) resolvedParentId = files[idx - 1].replace(/\.json$/, '');
+      } catch {}
+    }
+    if (resolvedParentId) {
+      try {
+        const parentShot = await shotShow(paths, filmId, resolvedParentId);
+        const keptTake = parentShot.takes?.find((t) => t.verdict === 'kept') || parentShot.takes?.[parentShot.takes.length - 1];
+        if (keptTake) {
+          const parentDir = `${paths.filmDir(filmId)}/renders/${keptTake.jobId}`;
+          const tailPath = `${parentDir}/tail_frame.png`;
+          const mp4Path = `${parentDir}/shot.mp4`;
+          try {
+            const tailData = await readFile(tailPath);
+            firstFrame = { data: tailData, mimeType: 'image/png' };
+          } catch {
+            try {
+              await execFileAsync('ffmpeg', ['-y', '-sseof', '-0.1', '-i', mp4Path, '-frames:v', '1', '-q:v', '2', tailPath]);
+              const tailData = await readFile(tailPath);
+              firstFrame = { data: tailData, mimeType: 'image/png' };
+            } catch {}
+          }
+        }
+      } catch {}
+    }
+  }
+
   if (!firstFrame) {
     const plate = await findPlate(paths, filmId, shot.refs);
     if (!plate) {
@@ -332,6 +370,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     shot_id: z.string(),
     film_id: z.string().optional(),
     quality: z.enum(['turbo', 'standard', 'max', 'ultra']).optional(),
+    chain_from_shot_id: z.string().optional(),
   }, async (a) => guard(async () => {
     // 1. args
     if (!a.shot_id.trim()) {
@@ -354,6 +393,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       shot,
       quality: a.quality ?? ('standard' as const),
       tool: 'render_shot',
+      chainFromShotId: a.chain_from_shot_id,
     });
 
     // 9. snake_case wire output
@@ -533,6 +573,12 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const artifactPath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/shot.mp4`;
     await ensureDir(`${paths.filmDir(filmId)}/renders/${entry.job_id}`);
     await writeFile(artifactPath, art.data);
+
+    // Auto-extract tail frame for instant continuous chaining
+    const tailFramePath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/tail_frame.png`;
+    try {
+      await execFileAsync('ffmpeg', ['-y', '-sseof', '-0.1', '-i', artifactPath, '-frames:v', '1', '-q:v', '2', tailFramePath]);
+    } catch {}
 
     // 8. jobs.json: the completed entry carries the artifact + the actual facts;
     //    the refund note and any failure text described interim states — the
