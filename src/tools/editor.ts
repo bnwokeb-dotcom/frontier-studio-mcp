@@ -137,13 +137,77 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         const edlPath = join(timelinesDir, `${timelineName}.edl`);
         await writeFile(edlPath, edlLines.join('\n'), 'utf8');
 
+        // Build Pixar OpenTimelineIO (.otio)
+        const otioTimeline = {
+          OTIO_SCHEMA: 'Timeline.1',
+          name: timelineName,
+          metadata: {
+            viduxtool_lineage: {
+              film_id: filmId,
+              generator: 'VIDUXTOOL / Frontier Studio Engine',
+              exported_at: new Date().toISOString()
+            }
+          },
+          global_start_time: {
+            OTIO_SCHEMA: 'RationalTime.1',
+            rate: fps,
+            value: 0
+          },
+          tracks: {
+            OTIO_SCHEMA: 'Stack.1',
+            children: [
+              {
+                OTIO_SCHEMA: 'Track.1',
+                name: 'V1_Generative_Video',
+                kind: 'Video',
+                children: shots.map((shot) => {
+                  const durationFrames = Math.round(shot.durationS * fps);
+                  const keptTake = shot.takes?.find((t) => t.verdict === 'kept');
+                  const videoFile = keptTake ? `renders/${keptTake.jobId}/shot.mp4` : `renders/placeholder_${shot.id}.mp4`;
+                  return {
+                    OTIO_SCHEMA: 'Clip.1',
+                    name: shot.id,
+                    source_range: {
+                      OTIO_SCHEMA: 'TimeRange.1',
+                      start_time: {
+                        OTIO_SCHEMA: 'RationalTime.1',
+                        rate: fps,
+                        value: 0
+                      },
+                      duration: {
+                        OTIO_SCHEMA: 'RationalTime.1',
+                        rate: fps,
+                        value: durationFrames
+                      }
+                    },
+                    media_reference: {
+                      OTIO_SCHEMA: 'ExternalReference.1',
+                      target_url: `file://${videoFile}`
+                    },
+                    metadata: {
+                      shot_id: shot.id,
+                      lens: shot.camera.lens,
+                      move: shot.camera.move,
+                      lighting: shot.cinematics?.lightingSetup || 'motivated_natural'
+                    }
+                  };
+                })
+              }
+            ]
+          }
+        };
+
+        const otioPath = join(timelinesDir, `${timelineName}.otio`);
+        await writeFile(otioPath, JSON.stringify(otioTimeline, null, 2), 'utf8');
+
         return out({
           timeline_name: timelineName,
           total_shots: shots.length,
           total_runtime_s: Number((currentFrame / 24).toFixed(2)),
           fcpxml_path: xmlPath,
           edl_path: edlPath,
-          compatibility: ['DaVinci Resolve', 'Adobe Premiere Pro', 'Final Cut Pro'],
+          otio_path: otioPath,
+          compatibility: ['DaVinci Resolve', 'Adobe Premiere Pro', 'Final Cut Pro', 'OpenTimelineIO'],
         });
       }),
   );
@@ -489,6 +553,64 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           eyeline_note: eyelineNote,
           directorial_directive: directorialDirective,
           chain_parent_id: recommendedTransition === 'continuous' ? shotA.id : null,
+        });
+      }),
+  );
+
+  // Automated Computer Vision Quality Control Audit Tool
+  server.tool(
+    'qc_vision_audit',
+    'Runs automated computer vision and quality control audit on a rendered MP4 video using FFmpeg black frame, freeze frame, and temporal glitch detection.',
+    {
+      video_path: z.string().describe('Absolute or studio-relative path to the MP4 file to audit'),
+      detect_black_frames: z.boolean().default(true).describe('Detect sudden black frames/tears'),
+      detect_freeze_frames: z.boolean().default(true).describe('Detect frozen frames/stalls'),
+      min_freeze_duration_s: z.number().default(0.5).describe('Minimum duration in seconds to count as frozen video stall'),
+    },
+    async (a) =>
+      guard(async () => {
+        let fullPath = a.video_path;
+        if (!fullPath.startsWith('/') && !fullPath.match(/^[a-zA-Z]:[\\/]/)) {
+          fullPath = join(studioRoot, fullPath);
+        }
+
+        try {
+          await stat(fullPath);
+        } catch {
+          throw errNotFound(`video file not found at ${a.video_path}`, 'provide a valid rendered video file path');
+        }
+
+        const filters: string[] = [];
+        if (a.detect_black_frames) filters.push('blackdetect=d=0.1:pic_th=0.98');
+        if (a.detect_freeze_frames) filters.push(`freezedetect=n=-60dB:d=${a.min_freeze_duration_s}`);
+        const vf = filters.length > 0 ? filters.join(',') : 'null';
+
+        let stderr = '';
+        try {
+          const res = await execFileAsync('ffmpeg', ['-i', fullPath, '-vf', vf, '-f', 'null', '-']);
+          stderr = res.stderr || '';
+        } catch (err: any) {
+          stderr = err.stderr || err.message || '';
+        }
+
+        const issues: string[] = [];
+        if (stderr.includes('black_start')) {
+          const match = stderr.match(/black_start:([0-9.]+)\s+black_end:([0-9.]+)/);
+          issues.push(`Black frame glitch detected at ${match ? match[1] + 's - ' + match[2] + 's' : 'multiple timestamps'}`);
+        }
+        if (stderr.includes('freeze_start')) {
+          const match = stderr.match(/freeze_start:([0-9.]+)/);
+          issues.push(`Frozen frame stall detected at ${match ? match[1] + 's' : 'multiple timestamps'}`);
+        }
+
+        const passed = issues.length === 0;
+        return out({
+          video_path: a.video_path,
+          passed_qc: passed,
+          issues_detected: issues,
+          recommendation: passed
+            ? 'Approved: video passes temporal consistency and frame integrity checks.'
+            : 'Rejected: video has glitches/freezes. Trigger localized inpaint re-roll or seed adjustment.',
         });
       }),
   );

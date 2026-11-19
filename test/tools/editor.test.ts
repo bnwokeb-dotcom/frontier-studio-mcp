@@ -80,6 +80,7 @@ describe('Editor Tools (FCPXML, EDL & FFmpeg Assembly)', () => {
     expect(data.total_runtime_s).toBe(9); // 5s + 4s
     expect(data.fcpxml_path).toContain('.fcpxml');
     expect(data.edl_path).toContain('.edl');
+    expect(data.otio_path).toContain('.otio');
 
     // Read and verify FCPXML structure
     const fcpxml = await readFile(data.fcpxml_path, 'utf8');
@@ -96,6 +97,22 @@ describe('Editor Tools (FCPXML, EDL & FFmpeg Assembly)', () => {
     expect(edl).toContain('TITLE: film_edit');
     expect(edl).toContain('001  AX       V     C');
     expect(edl).toContain('002  AX       V     C');
+
+    // Read and verify OpenTimelineIO structure
+    const otio = JSON.parse(await readFile(data.otio_path, 'utf8'));
+    expect(otio.OTIO_SCHEMA).toBe('Timeline.1');
+    expect(otio.name).toBe('film_edit');
+    expect(otio.tracks.children[0].name).toBe('V1_Generative_Video');
+    expect(otio.tracks.children[0].children.length).toBe(2);
+  });
+
+  it('qc_vision_audit tool refuses unknown video file path with NOT_FOUND', async () => {
+    const res = await client.callTool({
+      name: 'qc_vision_audit',
+      arguments: { video_path: 'renders/non_existent_shot.mp4' },
+    });
+    expect((res as any).isError).toBe(true);
+    expect((res as any).content[0].text).toContain('video file not found');
   });
 
   it('film_assemble creates FFmpeg concat manifest and copy command', async () => {
