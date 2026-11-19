@@ -1,0 +1,23 @@
+{
+  "id": "AC64",
+  "name": "Restoration Timelapse",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🏗️ An AI restoration visualizer that generates ultra-realistic text-to-image and video prompts for step-by-step transformations. Just upload a reference image or choose a space, and it builds the full sequence for you 🎬",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Restoration-Timelapse-Icon-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:50.264Z"
+}

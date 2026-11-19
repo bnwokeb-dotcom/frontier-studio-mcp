@@ -1,0 +1,23 @@
+{
+  "id": "AC72",
+  "name": "Skeleton Shorts",
+  "category": "Advertisement",
+  "category_slug": "advertisement",
+  "summary": "🧠✨ Turns scripts, ideas, or images into 🎬 cinematic 3D text-to-image prompts.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Skeleton-Shorts-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:48.412Z"
+}

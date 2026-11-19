@@ -1,0 +1,23 @@
+{
+  "id": "AC74",
+  "name": "Slime Face",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "I need 2 answers before I generate the prompts: 1. 🎭 Character or subject 2. 🪵 Table or background",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Slime-Face-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:19.405Z"
+}

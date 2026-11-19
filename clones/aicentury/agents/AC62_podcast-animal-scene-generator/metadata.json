@@ -1,0 +1,23 @@
+{
+  "id": "AC62",
+  "name": "Podcast Animal Scene Generator",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Generate ultra-realistic podcast scenes with any animal, custom LED lights, and a neon logo.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Animal-Podcast-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:34.208Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC40",
+  "name": "Horror Scene Prompt Generator",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Type in a horror scene idea or upload a photo, and I’ll turn it into: 1 main cinematic horror prompt (for your image) 5 matching b-roll prompts (different angles/actions)",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Horror-Scene-Prompt-Generator-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:29.648Z"
+}

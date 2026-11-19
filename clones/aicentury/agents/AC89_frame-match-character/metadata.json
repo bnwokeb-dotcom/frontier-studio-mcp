@@ -1,0 +1,23 @@
+{
+  "id": "AC89",
+  "name": "Frame Match Character",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Upload a frame and your reference character, get copy-ready JSON text-to-image prompts that recreate the same shot, pose, style and composition with your character swapped in.",
+  "version": 10,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/frame-match-character-icon-72x72-2.webp",
+  "use_when": "The user wants to recreate a screenshot, movie still or viral frame with their own character, swap the subject of an image while keeping the camera, pose and lighting, or turn a stylized frame (anime, claymation, cartoon, 3D) into a matching or photorealistic prompt.",
+  "produces": "Separate copy-ready JSON prompt blocks with full frame analysis: close match + creative variant for photoreal frames, or original-style close match, original-style variant and a photorealistic adaptation for stylized frames. Text and logos removed, character locked across frames.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:41:33.540Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC81",
+  "name": "Wojak Scene Generator",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "Generate the perfect text-to-image prompt for a Wojak scene based on an image or scene description.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Wojak-Scene-Generator-Iocn.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:43.743Z"
+}

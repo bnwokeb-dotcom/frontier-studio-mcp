@@ -1,0 +1,23 @@
+{
+  "id": "AC83",
+  "name": "X-Ray Animal Reference",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Type in any animal to generate reference-style x-ray 3D prompts with Green Screen 🟩, Blue Studio 🟦, and custom viewpoints 🎥",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/X-Ray-Animal-Reference-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:45.774Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC2",
+  "name": "2D Cartoon Animations",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "🎨 Character Sheet & Background Factory generates copy-paste text-to-image prompts for consistent, animation-ready assets in a locked 2D cartoon explainer style.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/2D-Cartoon-Animations-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:31.184Z"
+}

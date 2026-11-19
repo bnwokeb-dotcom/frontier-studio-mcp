@@ -1,0 +1,23 @@
+{
+  "id": "AC44",
+  "name": "Kling AI Studio",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "🎭 Character idea/reference → Complete film-grade character sheet. 🎞️ Story idea → Storyboard + video prompts for any style, fast and clean.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 3,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/ac44-kling-ai-studio-icon-72x72-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:59.989Z"
+}

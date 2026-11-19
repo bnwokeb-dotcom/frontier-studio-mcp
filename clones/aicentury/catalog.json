@@ -1,0 +1,1877 @@
+[
+  {
+    "id": "AC91",
+    "name": "Cast Swap",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Swap anyone in a video for yourself or any character: it scans the clip, maps your images to the people you pick, and writes one timestamped video-to-video prompt that keeps every move, cut and second.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 8,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/cast-swap-icon-72x72-1.webp",
+    "use_when": "The user wants to put themselves or a character into a movie scene, music video or TikTok, swap or recast an actor or singer, replace a person in a video with a reference image, restyle a clip while swapping its cast (anime, 3D animated, a show's own style), or fix a character swap that came out wrong.",
+    "produces": "A scan of the uploaded clip (exact duration, cuts, every person, a timestamped timeline), then one copy-ready video-to-video prompt that states the duration, maps each reference image to the person it replaces, carries whole-second timestamps from the real cuts, and comes with attach, settings, @-tag and tool-fit notes. Long clips are split into parts that add up exactly.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:30.733Z",
+    "dir": "AC91_cast-swap",
+    "reference_files_count": 7
+  },
+  {
+    "id": "AC89",
+    "name": "Frame Match Character",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Upload a frame and your reference character, get copy-ready JSON text-to-image prompts that recreate the same shot, pose, style and composition with your character swapped in.",
+    "version": 10,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/frame-match-character-icon-72x72-2.webp",
+    "use_when": "The user wants to recreate a screenshot, movie still or viral frame with their own character, swap the subject of an image while keeping the camera, pose and lighting, or turn a stylized frame (anime, claymation, cartoon, 3D) into a matching or photorealistic prompt.",
+    "produces": "Separate copy-ready JSON prompt blocks with full frame analysis: close match + creative variant for photoreal frames, or original-style close match, original-style variant and a photorealistic adaptation for stylized frames. Text and logos removed, character locked across frames.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:33.540Z",
+    "dir": "AC89_frame-match-character",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC88",
+    "name": "Mini Kittens",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Writes copy-ready prompts for viral photorealistic mini-kitten reels — palm-sized kittens standing upright in real human places, shot like candid night footage.",
+    "version": 17,
+    "steps": 1,
+    "knowledge_docs_count": 7,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/09/mini-kittens-icon-72x72-1.webp",
+    "use_when": "The user wants a kitten video or image prompt, wants a cat character sheet or a mini version of their own cat, wants kitten scene ideas or a storyboard, wants a timestamped video prompt from a storyboard, a single image or a character sheet, or wants to appear in the video with the kittens themselves.",
+    "produces": "A character sheet that locks a reusable kitten cast, a storyboard of linked image prompts, or a timestamped video prompt with the length and shot count the user picks — each copy-ready, and optionally with the user written into the scene from a photo of themselves.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:39.173Z",
+    "dir": "AC88_mini-kittens",
+    "reference_files_count": 7
+  },
+  {
+    "id": "AC93",
+    "name": "PS2 Style",
+    "category": "Styles",
+    "category_slug": "styles",
+    "summary": "Turn any idea, your city, a game or your own brand into prompts in the 2000s PS2 game look, like GTA San Andreas. Free Style videos of 5 to 15 seconds, the viral \"how X must feel like\" reel, brand promos, character sheets from your photo and empty game worlds.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 14,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/11/ps2-style-icon-72x72-1.webp",
+    "use_when": "You want a PS2 or GTA San Andreas style image or video; a retro low-poly game look; to turn yourself into a PS2 game character from a photo; the viral \"how [city, game, film] must feel like\" reel; your clothing brand or product in a PS2 game promo; empty PS2 game environments; or the next shot after an image you already made.",
+    "produces": "Copy-ready image prompts (single shot, panel shot or continue from your image), each with its matching timestamped video prompt in the same reply; 5 to 15 second Free Style videos; the 8-shot Nostalgia reel with an edit plan and cut points; promo shots built around your product photo; a four-view character sheet; connected empty environments; idea menus of 10 and five next-shot ideas under every shot; model, attach and settings lines for GPT Image 2 and Wan 3.0; optional generation through the OpenArt or Higgsfield MCP.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:42.847Z",
+    "dir": "AC93_ps2-style",
+    "reference_files_count": 14
+  },
+  {
+    "id": "AC90",
+    "name": "Vertical Sprint",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Turns a character (uploaded reference or a newly generated athlete), a giant vertical structure, an aerial trick and a target model into one finished photorealistic text-to-video prompt for the viral Vertical Sprint format: an athlete sprints down a crowd corridor, runs straight up a 30-storey wall,",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 4,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/vertical-sprint-icon-72x72-1.webp",
+    "use_when": "The user types \"start\", wants a vertical sprint, wall-run or mega-ramp run-up flip video, a \"person runs up a giant wall and backflips\" clip, a big extreme-sports event style stunt video, or wants to recreate this format with a new character, structure or trick for Seedance 2.5, Wan 3.0, Kling or a similar video model.",
+    "produces": "One finished, timestamped 15-second 9:16 photorealistic text-to-video prompt in a single copy-ready block (concept, character, environment, camera lock, timeline, physics rules, negatives), written for Seedance 2.5 or compacted under Wan 3.0's 5,000-character limit, plus a follow-up menu for variations.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:51.491Z",
+    "dir": "AC90_vertical-sprint",
+    "reference_files_count": 4
+  },
+  {
+    "id": "AC92",
+    "name": "Wan Studio",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Cinematic prompt studio for the Wan video model: film-grade character sheets, shot-by-shot storyboards, timed Wan video prompts with or without dialogue, and five matching environments for one world, in your character's own style or one of ten styles.",
+    "version": 6,
+    "steps": 1,
+    "knowledge_docs_count": 5,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/wan-studio-icon-72x72-1.webp",
+    "use_when": "The user wants a character sheet or turnaround from an idea or a reference image, a storyboard for a video idea, or a timed Wan or Wan 3.0 video prompt with or without dialogue; or backgrounds, environments, locations or sets for a character or a story: with or without a character image, matched to the character's look or in a style they pick (photoreal, anime, 2D cartoon, 3D animated, claymation, pixel art and more). Also when they want themselves in a Wan video built from scratch, from their own photo.",
+    "produces": "Copy-ready prompts, each in its own code block: a film-grade character sheet; a shot-by-shot storyboard with the shot count and length the user picks; a timed Wan 3.0 video prompt with or without dialogue, under 2,000 characters (3,000 for 20-30 seconds), with a Wan settings line; or five standalone JSON background prompts for one world (1 main location and 4 connected places, each with camera angle, framing, lens, lighting and a negative prompt), empty so characters can be placed in later. Every answer ends with a next step, so a character, its world, its storyboard and its video connect.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:54.778Z",
+    "dir": "AC92_wan-studio",
+    "reference_files_count": 5
+  },
+  {
+    "id": "AC86",
+    "name": "Lava Drop",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Generates a precisely timed 8–30-second photorealistic vertical video prompt for a fictional helicopter crewman dropping a giant object into an active lava lake, with material-specific impact physics, a cinematic payoff and a safe aftermath.",
+    "version": 11,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/09/lava-drop-icon-72x72-1.webp",
+    "use_when": "Use when the user wants a viral object-versus-lava video, a helicopter lava-drop stunt, object ideas for the format, or an exact 8–30-second photorealistic text-to-video prompt.",
+    "produces": "One self-contained English video-generation prompt with contiguous timestamps, 24 fps, vertical handheld helicopter framing, object-specific lava reactions, sound design and continuity constraints.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:41:57.495Z",
+    "dir": "AC86_lava-drop",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC84",
+    "name": "Funny Animal Stunts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Turns a character reference image, an animal, an environment and a 10- or 15-second duration into a finished photorealistic prompt for the viral animal-rider stunt: the rider approaches a ramp, launches with the animal, separates, rotates in the air, and lands back on the SAME animal.",
+    "version": 13,
+    "steps": 1,
+    "knowledge_docs_count": 4,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/09/funny-animal-stunts-icon-72x72-3.webp",
+    "use_when": "The user wants a viral animal stunt video, a bull-riding or elephant-jump flip clip, eyewitness-style smartphone footage of an impossible animal trick, or wants to recreate the mounted-launch-flip-remount format with a different character, animal or environment.",
+    "produces": "One finished photorealistic text-to-video prompt for a 10- or 15-second viral animal-rider stunt clip, with the closed-loop stunt beats and the camera treatment locked.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:00.246Z",
+    "dir": "AC84_funny-animal-stunts",
+    "reference_files_count": 4
+  },
+  {
+    "id": "AC85",
+    "name": "POV Water Slide",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Turns a time of day, environment, weather, LED colour, slide route, ending and duration into one finished photorealistic text-to-video prompt for the viral first-person POV water-slide format: a vertigo reveal into the drop, a committing hop, then a continuous descent to a splashdown.",
+    "version": 13,
+    "steps": 1,
+    "knowledge_docs_count": 4,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/09/pov-water-slide-icon-72x72-3.webp",
+    "use_when": "The user wants a POV water slide video, a skyscraper or cliff slide clip, a vertigo or fear-of-heights POV ride, a transparent LED slide descending a tower, mountain, canyon or waterfall, or wants to recreate the 'would never go down that' first-person slide format in a new environment.",
+    "produces": "One finished photorealistic first-person text-to-video prompt for a continuous-take POV water-slide descent, from the edge to the splashdown.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:07.391Z",
+    "dir": "AC85_pov-water-slide",
+    "reference_files_count": 4
+  },
+  {
+    "id": "AC60",
+    "name": "Pet Comedy",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🐾 Upload your pet → get a funny, photoreal comedy story starring them. 🎬 Character → storyboard → timestamped video prompts, shot by shot.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 5,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/08/pet-show-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:11.948Z",
+    "dir": "AC60_pet-comedy",
+    "reference_files_count": 5
+  },
+  {
+    "id": "AC8",
+    "name": "Behind the scenes",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🎬 Name a city + a disaster → one photoreal miniature-set image + a matched video prompt. 🌊 Or upload a skyline photo → we drop it on the soundstage and unleash real practical FX.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/set-piece-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:15.655Z",
+    "dir": "AC8_behind-the-scenes",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC24",
+    "name": "Dream Drive",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🚗 Name a game, cartoon, anime or show — or upload a reference image → an iconic place on the horizon as you drive past, photoreal + nostalgic. 🌅 Dreamy golden-hour POV out the window → 1 copy-ready image prompt + 1 video prompt.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 5,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/avatar-E-pineapple-house-72x72-2.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:18.632Z",
+    "dir": "AC24_dream-drive",
+    "reference_files_count": 5
+  },
+  {
+    "id": "AC12",
+    "name": "Cardboard Crafts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🎬 Pick any object → get one 15-second cardboard-build video prompt that comes to life stage by stage. 📦 Raw cardboard + white studio + real hands → slow, satisfying, multi-stage build with a different camera each step.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/hf-20260727-162842-horizontal-373x210-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:21.463Z",
+    "dir": "AC12_cardboard-crafts",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC34",
+    "name": "Fruitcraft studio",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🍉 Pick any subject → get an optional finished-carving image + a cinematic ASMR fruit-carving video prompt. 🔪 Whole real fruit + Thai carving knife → intricate relief carved from the fruit's own layers — no paint, no fake morphs.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/hf-20260727-162909-horizontal-373x210-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:24.101Z",
+    "dir": "AC34_fruitcraft-studio",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC82",
+    "name": "Woodcraft Studio",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🪵 Pick any object → get an optional first-frame image prompt + a cinematic ASMR woodcarving video prompt. 🔨 Real workshop + hand tools + airbrush finish → a slow, satisfying, physically-real carve — no fake morphs, no real-car ending.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/hf-20260727-162857-horizontal-373x210-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:28.144Z",
+    "dir": "AC82_woodcraft-studio",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC36",
+    "name": "Giant Cam",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🐉 Pick a giant + a vantage → one photoreal image + one linked 15s video of a giant caught on a real camera. 📱 Amateur phone/travel realism, awe of scale — dwarfing ships, planes, coastlines and crowds. Never CGI.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 8,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/giant-cam-05-giant-hand-from-clouds-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:31.412Z",
+    "dir": "AC36_giant-cam",
+    "reference_files_count": 8
+  },
+  {
+    "id": "AC63",
+    "name": "Real Cartoon",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🧽 Name a cartoon or upload a cartoon image → made PHOTOREALISTIC, how it'd look in real life. 📱 First-person POV → copy-ready image + video prompts, in ☀️ Daytime Real or 🌙 Cinematic Night.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 19,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/real-cartoon-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:35.814Z",
+    "dir": "AC63_real-cartoon",
+    "reference_files_count": 19
+  },
+  {
+    "id": "AC38",
+    "name": "Handcraft Designs",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🪵 Pick or upload a design → get 5 matching handcrafted image + video prompts. One idea becomes a full set (e.g. lion → +elephant, tiger, gorilla, horse). Copy, paste, create.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/handcraft-prompt-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:39.141Z",
+    "dir": "AC38_handcraft-designs",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC80",
+    "name": "Viral Stage",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🥷 Stage a viral ninja showdown → 5 image prompts + 5 Seedance video prompts, image → video, every time. 🎬",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/06/ninja-stage-reels-v5-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:41.706Z",
+    "dir": "AC80_viral-stage",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC22",
+    "name": "Dragon Ride POV Shorts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🐉 Generate cinematic, hyper-photorealistic first-person dragon-riding shorts🔥🎬",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/06/1_by_1__icon_72x72.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:44.331Z",
+    "dir": "AC22_dragon-ride-pov-shorts",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC67",
+    "name": "Room Glow Up",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🏚️ Pick a room → get a 4-stage transformation: derelict → stripped → renovated → modern. 🎬 → Locked-camera timelapse video prompts that recreate the viral “building upgrade” look.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/06/Gaming-Purple-C.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:47.234Z",
+    "dir": "AC67_room-glow-up",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC23",
+    "name": "Dream Core Studio Pro",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🌸 Generates cinematic dream-nostalgia prompts",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/06/house_ladder_72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:49.345Z",
+    "dir": "AC23_dream-core-studio-pro",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC50",
+    "name": "Mechanical Toy Creator",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🤖 Subject → Mechanical Pod → Transformer-Style Reveal 📦 Get 6 related models with ready-to-use image and video prompts for viral AI shorts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Mechanical-Toy-Creator.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:51.685Z",
+    "dir": "AC50_mechanical-toy-creator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC52",
+    "name": "Mini Rescue",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🧍 Tiny people in danger → giant hand rescue scene. 🎬 Get viral-ready image + video prompts for cinematic shorts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/MIni-rescue-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:53.917Z",
+    "dir": "AC52_mini-rescue",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC16",
+    "name": "Claymation Shorts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Start creating your own claymation characters and movie scenes",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 2,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Claymation-Shorts-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:56.757Z",
+    "dir": "AC16_claymation-shorts",
+    "reference_files_count": 2
+  },
+  {
+    "id": "AC46",
+    "name": "Macro ASMR",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🎬 Start → choose an object → get instant image + video prompts. 🖐️ Clean black-background macro scenes with hands, object, tool, and satisfying detail.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Macro-ASMR-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:42:59.019Z",
+    "dir": "AC46_macro-asmr",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC14",
+    "name": "Celebrity Walk Out",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "custom GPT that creates ultra-realistic text-to-video prompts for mass celebrity entry scenes",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Celebrity-walk-out-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:02.245Z",
+    "dir": "AC14_celebrity-walk-out",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC18",
+    "name": "DIY Cement Planter",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Create DIY Planter Videos",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/DIY-Cement-Planter-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:05.173Z",
+    "dir": "AC18_diy-cement-planter",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC32",
+    "name": "Fruit Mold",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🍓 Choose person + fruit + shape → I turn them into ready-made fruit-mold prompts fast.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Fruit-Mold.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:07.796Z",
+    "dir": "AC32_fruit-mold",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC79",
+    "name": "Topiary Shorts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🌿 Turns any animal or object into luxury garden topiary prompts. ➡️ Get ready-to-use text-to-image and text-to-video prompts in seconds.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Topiary-Shorts-Profile-Picture.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:10.143Z",
+    "dir": "AC79_topiary-shorts",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC78",
+    "name": "Time Travel Vlog",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Create cinematic selfie-vlog prompts for text-to-image and text-to-video generation in any setting 🌍",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Time-Travel-Vlog-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:12.431Z",
+    "dir": "AC78_time-travel-vlog",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC33",
+    "name": "Fruit Movie Maker",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Click Start 🎬, upload your reference characters 🧑‍🎨, and answer 3 quick questions to generate cinematic image and video prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Fruit-Movie-Maker-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:14.741Z",
+    "dir": "AC33_fruit-movie-maker",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC31",
+    "name": "Fruit Avatar",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "• ✏️ Give a short description (or just a fruit) • 🎨 Get a high-quality text-to-image prompt • 🖼️ Generate clean reference images • 🎬 Use them for series, shorts, and videos",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Fruit-Avatar-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:17.231Z",
+    "dir": "AC31_fruit-avatar",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC74",
+    "name": "Slime Face",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "I need 2 answers before I generate the prompts: 1. 🎭 Character or subject 2. 🪵 Table or background",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Slime-Face-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:19.405Z",
+    "dir": "AC74_slime-face",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC19",
+    "name": "Dancing Pet",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🕺 Your pet, or any pet → a photoreal still of it standing upright on its hind legs. 🎬 Drop it in any place, then animate it into a dance with your own reference clip.",
+    "version": 6,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/08/dancing-pet-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:22.703Z",
+    "dir": "AC19_dancing-pet",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC5",
+    "name": "Animal Diving Image And Prompt Generator",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Create cinematic images and prompts of animals diving. Simply enter an animal, then select the height.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Animal-Diving-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:24.768Z",
+    "dir": "AC5_animal-diving-image-and-prompt-generator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC35",
+    "name": "Gen-Z Rant Scriptwriter",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "💡 Give me an idea or a viral script, and I’ll make 5 Gen-Z rant scripts out of it!",
+    "version": 3,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Gen-Z-Rant-Scriptwriter-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:27.431Z",
+    "dir": "AC35_gen-z-rant-scriptwriter",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC40",
+    "name": "Horror Scene Prompt Generator",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Type in a horror scene idea or upload a photo, and I’ll turn it into: 1 main cinematic horror prompt (for your image) 5 matching b-roll prompts (different angles/actions)",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Horror-Scene-Prompt-Generator-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:29.648Z",
+    "dir": "AC40_horror-scene-prompt-generator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC47",
+    "name": "Make ASMR Images And Prompts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Delivers macro photo prompts from a color and object",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/ASMR-Slicing-Objects-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:31.962Z",
+    "dir": "AC47_make-asmr-images-and-prompts",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC62",
+    "name": "Podcast Animal Scene Generator",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Generate ultra-realistic podcast scenes with any animal, custom LED lights, and a neon logo.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Animal-Podcast-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:34.208Z",
+    "dir": "AC62_podcast-animal-scene-generator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC29",
+    "name": "Floor Transformation",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Transform home interiors into cinematic timelapse prompts featuring artistic luxury epoxy floors.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Floor-Transformation-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:36.406Z",
+    "dir": "AC29_floor-transformation",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC30",
+    "name": "Food Eating Itself",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Turn any food item into five adorable baby-faced prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Food-Eating-Itself-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:38.523Z",
+    "dir": "AC30_food-eating-itself",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC3",
+    "name": "ASMR Mouth Eating 👄🍬 🍭 🍯 🍇",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "This GPT creates ultra-realistic candy-in-mouth ASMR prompts: 1 main, 4 matching (same reference style, only the food changes), and 5 eating video prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/ASMR-Mouth-Eating-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:40.826Z",
+    "dir": "AC3_asmr-mouth-eating",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC11",
+    "name": "Car Evolution 🚗",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "This GPT helps you generate cinematic highway scene prompts and full car evolution prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Car-Evolution-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:43.045Z",
+    "dir": "AC11_car-evolution",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC83",
+    "name": "X-Ray Animal Reference",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Type in any animal to generate reference-style x-ray 3D prompts with Green Screen 🟩, Blue Studio 🟦, and custom viewpoints 🎥",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/X-Ray-Animal-Reference-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:45.774Z",
+    "dir": "AC83_x-ray-animal-reference",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC6",
+    "name": "Animal X-Ray Shorts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🧠✨ Turns scripts, ideas, or images into 🎬 cinematic 3D text-to-image prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Animal-X-Ray-Shorts-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:47.913Z",
+    "dir": "AC6_animal-x-ray-shorts",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC64",
+    "name": "Restoration Timelapse",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🏗️ An AI restoration visualizer that generates ultra-realistic text-to-image and video prompts for step-by-step transformations. Just upload a reference image or choose a space, and it builds the full sequence for you 🎬",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Restoration-Timelapse-Icon-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:50.264Z",
+    "dir": "AC64_restoration-timelapse",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC49",
+    "name": "Matchstick Shorts",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🔥 Type an object → get a matchstick image prompt 🖼 and burning video prompt 🎬",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Matchstick-Shorts-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:53.502Z",
+    "dir": "AC49_matchstick-shorts",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC41",
+    "name": "Hydraulic Press",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Click Start, choose: 🔹 Small (phones, fruit, tools) 🔸 Large (cars, safes, machines) Then type an object to generate realistic image + crush video prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Hydraulic-Press-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:56.614Z",
+    "dir": "AC41_hydraulic-press",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC68",
+    "name": "Rust Removal",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Creates ultra-realistic rust cleaning image & video prompts. Enter one object, customize (or use ⚡ Quick Start), and get cinematic, high-detail prompts with mandatory spray, foam, and full-surface realism ✨",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Rust-Removal-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:43:58.842Z",
+    "dir": "AC68_rust-removal",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC13",
+    "name": "Cartoon Nostalgia",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Generate 4 Pixar-style text-to-image prompts that form a short emotional story",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Cartoon-Nostalgia-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:01.212Z",
+    "dir": "AC13_cartoon-nostalgia",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC4",
+    "name": "Abandoned Movie Scenes",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "Type in any movie name, and get 5 high-detail prompts showing decayed, abandoned animatronic versions of its characters lifeless props left behind on a ruined set.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Abandoned-Movie-Scenes-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:03.687Z",
+    "dir": "AC4_abandoned-movie-scenes",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC51",
+    "name": "Micro Camera Animal",
+    "category": "AI Shorts",
+    "category_slug": "ai-shorts",
+    "summary": "🎥 Create ultra-realistic wildlife documentary prompts for tiny animals wearing micro-cameras, with instant image, video, and angle variations.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Micro-Camera-Animal-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:06.146Z",
+    "dir": "AC51_micro-camera-animal",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC21",
+    "name": "Doodle ASMR",
+    "category": "ASMR",
+    "category_slug": "asmr",
+    "summary": "✏️ Type Start → a flat white doodle loose in a real, wet world → oddly-satisfying ASMR image + video prompts in seconds.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/doodle-world-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:10.447Z",
+    "dir": "AC21_doodle-asmr",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC45",
+    "name": "Low Poly",
+    "category": "Styles",
+    "category_slug": "styles",
+    "summary": "🕹 Model Sheet · Storyboard · Video Prompt → copy-ready prompts in ONE locked PlayStation-1 / PSX-era low-poly look.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/char-avatar-teal.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:12.917Z",
+    "dir": "AC45_low-poly",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC17",
+    "name": "Comic Studio",
+    "category": "Styles",
+    "category_slug": "styles",
+    "summary": "🎬 Character Sheet · Storyboard · Video Prompt → copy-ready prompts in ONE locked cinematic comic-painterly style. 🖌️ Cel-shaded 3D + graphic ink + hand-painted texture → every scene looks like a moving painted comic book.",
+    "version": 7,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/comic-studio-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:16.264Z",
+    "dir": "AC17_comic-studio",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC7",
+    "name": "Anime Studio",
+    "category": "Styles",
+    "category_slug": "styles",
+    "summary": "🎬 Character Sheet · Storyboard · Video Prompt → copy-ready prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/car-icon-72x72-A-full.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:19.323Z",
+    "dir": "AC7_anime-studio",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC10",
+    "name": "Break The Screen",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "🎬 Pick a movie scene + an effect → a ready-made image + video prompt where the film bursts out of the cinema screen. 💥 Water, fire, jungle, sand or your own → viral \"4D cinema\" clips in seconds.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/break-the-screen-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:22.768Z",
+    "dir": "AC10_break-the-screen",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC65",
+    "name": "Retro Toons",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Generate copy-ready Character Sheet, Storyboard, and Video prompts inspired by 1930 cartoon style",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 13,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/06/retro-toon-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:26.268Z",
+    "dir": "AC65_retro-toons",
+    "reference_files_count": 13
+  },
+  {
+    "id": "AC15",
+    "name": "Character Sheet Master",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Create Reference Character Sheets",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/08/Icon-72x72-3.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:28.510Z",
+    "dir": "AC15_character-sheet-master",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC2",
+    "name": "2D Cartoon Animations",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "🎨 Character Sheet & Background Factory generates copy-paste text-to-image prompts for consistent, animation-ready assets in a locked 2D cartoon explainer style.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/2D-Cartoon-Animations-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:31.184Z",
+    "dir": "AC2_2d-cartoon-animations",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC59",
+    "name": "Painterly 3D animation",
+    "category": "Styles",
+    "category_slug": "styles",
+    "summary": "Create hybrid 2D/3D painterly scenes and characters",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Painterly-3D-animation-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:34.097Z",
+    "dir": "AC59_painterly-3d-animation",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC20",
+    "name": "Documentary style 3D Image generator",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Create cinematic 3D Images and b-roll shots designed for documentaries, interviews, and storytelling. Upload a photo or describe your scene to generate ultra-realistic, featureless humanoid visuals in minimalistic environments—perfect for professional documentary production.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Documentary-style-3D-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:36.623Z",
+    "dir": "AC20_documentary-style-3d-image-generator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC27",
+    "name": "Every Explained",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Generates list-based explainer video title ideas with unique IDs, writes a strict item-by-item explainer script, then outputs 3 thumbnail prompts (vector, photorealistic, colored)",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Every-Explained-Iocon-2.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:38.924Z",
+    "dir": "AC27_every-explained",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC77",
+    "name": "Stickman Visuals 🎨",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Turns any user input (idea, script, or 1 image) into 7 consistent stickman text-to-image prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Stickman-Visuals-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:41.390Z",
+    "dir": "AC77_stickman-visuals",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC81",
+    "name": "Wojak Scene Generator",
+    "category": "YouTube Automation",
+    "category_slug": "youtube-automation",
+    "summary": "Generate the perfect text-to-image prompt for a Wojak scene based on an image or scene description.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Wojak-Scene-Generator-Iocn.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:43.743Z",
+    "dir": "AC81_wojak-scene-generator",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC9",
+    "name": "Brand Cartoon",
+    "category": "Advertisement",
+    "category_slug": "advertisement",
+    "summary": "🎬 Upload any brand logo (or many) → cinematic 3D cartoon characters that talk about themselves. 🖼️ Image Maker · 🎬 Video Prompt Maker · 📝 Script Maker → researched scripts + image & talking-video prompts. Bulk, any age.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 1,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/07/brand-cartoon-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:46.357Z",
+    "dir": "AC9_brand-cartoon",
+    "reference_files_count": 1
+  },
+  {
+    "id": "AC72",
+    "name": "Skeleton Shorts",
+    "category": "Advertisement",
+    "category_slug": "advertisement",
+    "summary": "🧠✨ Turns scripts, ideas, or images into 🎬 cinematic 3D text-to-image prompts.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Skeleton-Shorts-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:48.412Z",
+    "dir": "AC72_skeleton-shorts",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC57",
+    "name": "Object Talk",
+    "category": "Advertisement",
+    "category_slug": "advertisement",
+    "summary": "Turn any object into a talking character with an expressive face and a quick 10-second educational monologue.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Object-Talk-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:50.526Z",
+    "dir": "AC57_object-talk",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC37",
+    "name": "Guru Short Maker",
+    "category": "Advertisement",
+    "category_slug": "advertisement",
+    "summary": "Create viral Guru's and fitting scripts",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Guru-Short-Maker.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:52.923Z",
+    "dir": "AC37_guru-short-maker",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC71",
+    "name": "Seedance Studio",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Cinematic prompt studio: film-grade character sheets, shot-by-shot storyboards, timed video prompts with or without dialogue, and five matching environments for one world, in your character's own style or one of ten styles.",
+    "version": 10,
+    "steps": 1,
+    "knowledge_docs_count": 5,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/ac71-seedance-studio-icon-72x72-1.webp",
+    "use_when": "The user wants a character sheet or turnaround from an idea or a reference image, a storyboard for a video idea, a timed video prompt with or without dialogue for Seedance or any video model, or backgrounds, environments, locations or sets for a character or a story: with or without a character image, matched to the character's look or in a style they pick (photoreal, anime, 2D cartoon, 3D animated, claymation, pixel art and more). Also when they want themselves in a video built from scratch, or a stylised version of themselves that Seedance accepts.",
+    "produces": "Copy-ready prompts, each in its own code block: a film-grade character sheet; a shot-by-shot storyboard with the shot count and length the user picks; a timed video prompt with or without dialogue, under 2,000 characters; or five standalone JSON background prompts for one world (1 main location and 4 connected places, each with camera angle, framing, lens, lighting and a negative prompt), empty so characters can be placed in later. Every answer ends with a next step, so a character, its world, its storyboard and its video connect.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:57.142Z",
+    "dir": "AC71_seedance-studio",
+    "reference_files_count": 5
+  },
+  {
+    "id": "AC44",
+    "name": "Kling AI Studio",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "🎭 Character idea/reference → Complete film-grade character sheet. 🎞️ Story idea → Storyboard + video prompts for any style, fast and clean.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 3,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/ac44-kling-ai-studio-icon-72x72-1.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:44:59.989Z",
+    "dir": "AC44_kling-ai-studio",
+    "reference_files_count": 3
+  },
+  {
+    "id": "AC42",
+    "name": "Image Recreation PRO",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Upload any image, get a JSON output, then instantly recreate it as an image.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Image-Recreation-PRO-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:45:03.185Z",
+    "dir": "AC42_image-recreation-pro",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC55",
+    "name": "Nano Banana B-Roll",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Upload any image and get 5 B-roll JSON outputs for it, ready to use with Nano Banana.",
+    "version": 4,
+    "steps": 1,
+    "knowledge_docs_count": 0,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Nano-Banana-B-Roll-Icon.webp",
+    "use_when": "",
+    "produces": "",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:45:05.880Z",
+    "dir": "AC55_nano-banana-b-roll",
+    "reference_files_count": 0
+  },
+  {
+    "id": "AC54",
+    "name": "Environment Maker",
+    "category": "Cinematic Filmmaking",
+    "category_slug": "cinematic-filmmaking",
+    "summary": "Five connected cinematic environments from one world: empty movie-set backgrounds for your characters. Upload a character to match its look, or pick one of 30 styles (anime, 2D, 3D, photoreal and more), or just name a place, and get copy-ready JSON image prompts.",
+    "version": 5,
+    "steps": 1,
+    "knowledge_docs_count": 7,
+    "icon": "https://aicenturies.com/wp-content/uploads/2026/10/environment-maker-icon-72x72-1.webp",
+    "use_when": "You want backgrounds, environments, locations or movie sets for your characters; you want a whole world built around a character image; you want a place in anime, 2D, 3D or photoreal style; you want more locations from the same world; or you want a prompt that puts your character into one of the sets.",
+    "produces": "Five standalone JSON text-to-image prompts per request: one direct match plus four related locations from the same world, each with camera angle, framing, lens, lighting and a full prompt text. Empty by default, with extras on request. Also a style menu of 30 looks, location ideas, a chain prompt that ties the five sets to your first render, and a prompt that places your character into a set.",
+    "step_titles": [
+      {
+        "n": 1,
+        "title": "Instructions",
+        "expects": "none",
+        "step_type": "instruction"
+      }
+    ],
+    "kind": "instructions",
+    "scraped_at": "2026-11-19T07:45:09.697Z",
+    "dir": "AC54_environment-maker",
+    "reference_files_count": 7
+  }
+]

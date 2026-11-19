@@ -1,0 +1,23 @@
+{
+  "id": "AC12",
+  "name": "Cardboard Crafts",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🎬 Pick any object → get one 15-second cardboard-build video prompt that comes to life stage by stage. 📦 Raw cardboard + white studio + real hands → slow, satisfying, multi-stage build with a different camera each step.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 1,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/07/hf-20260727-162842-horizontal-373x210-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:21.463Z"
+}

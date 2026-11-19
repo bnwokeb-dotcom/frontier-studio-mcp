@@ -13,7 +13,9 @@
     "test": "vitest run",
     "dev": "tsx src/server.ts",
     "push": "node scripts/github-push.mjs",
-    "render:parallel": "node scripts/render-parallel.mjs"
+    "render:parallel": "node scripts/render-parallel.mjs",
+    "aicentury:mcp": "node clones/aicentury/server.mjs",
+    "aicentury:clone": "node scripts/clone-aicentury.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",

@@ -1,0 +1,23 @@
+{
+  "id": "AC8",
+  "name": "Behind the scenes",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🎬 Name a city + a disaster → one photoreal miniature-set image + a matched video prompt. 🌊 Or upload a skyline photo → we drop it on the soundstage and unleash real practical FX.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 1,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/07/set-piece-studio-icon-72x72-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:15.655Z"
+}

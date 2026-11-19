@@ -1,0 +1,23 @@
+{
+  "id": "AC42",
+  "name": "Image Recreation PRO",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Upload any image, get a JSON output, then instantly recreate it as an image.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Image-Recreation-PRO-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:45:03.185Z"
+}

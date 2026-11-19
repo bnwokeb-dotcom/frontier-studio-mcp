@@ -9,6 +9,16 @@
       "command": "npx",
       "args": ["-y", "rea-agents@6.7.0"],
       "note": "REA reverse-engineering server (version-pinned per skill). Doctor verdict: env healthy (node 24.18, win32 x64); native engines (Hopper/Ghidra/IDA/JADX) missing — NOT needed for TopView web/MCP reversal; JS analysis needs no engine. Approving this entry gives in-session rea_* tools for the TopView reversal."
+    },
+    "ai-century": {
+      "type": "http",
+      "url": "https://aicenturies.com/mcp",
+      "note": "AI Century Agent Skills Library (Live Remote HTTP MCP) - 75 viral video & filmmaking prompt workflows."
+    },
+    "ai-century-local": {
+      "command": "node",
+      "args": ["clones/aicentury/server.mjs"],
+      "note": "Offline cloned high-speed AI Century engine with local full-text search, direct prompt retrieval, and instant conversion to Frontier Studio render scenes."
     }
   }
 }

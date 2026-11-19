@@ -1,0 +1,23 @@
+{
+  "id": "AC90",
+  "name": "Vertical Sprint",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Turns a character (uploaded reference or a newly generated athlete), a giant vertical structure, an aerial trick and a target model into one finished photorealistic text-to-video prompt for the viral Vertical Sprint format: an athlete sprints down a crowd corridor, runs straight up a 30-storey wall,",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 4,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/vertical-sprint-icon-72x72-1.webp",
+  "use_when": "The user types \"start\", wants a vertical sprint, wall-run or mega-ramp run-up flip video, a \"person runs up a giant wall and backflips\" clip, a big extreme-sports event style stunt video, or wants to recreate this format with a new character, structure or trick for Seedance 2.5, Wan 3.0, Kling or a similar video model.",
+  "produces": "One finished, timestamped 15-second 9:16 photorealistic text-to-video prompt in a single copy-ready block (concept, character, environment, camera lock, timeline, physics rules, negatives), written for Seedance 2.5 or compacted under Wan 3.0's 5,000-character limit, plus a follow-up menu for variations.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:41:51.491Z"
+}

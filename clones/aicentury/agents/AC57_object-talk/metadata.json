@@ -1,0 +1,23 @@
+{
+  "id": "AC57",
+  "name": "Object Talk",
+  "category": "Advertisement",
+  "category_slug": "advertisement",
+  "summary": "Turn any object into a talking character with an expressive face and a quick 10-second educational monologue.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Object-Talk-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:50.526Z"
+}

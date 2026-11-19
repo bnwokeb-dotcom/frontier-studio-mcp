@@ -1,0 +1,23 @@
+{
+  "id": "AC67",
+  "name": "Room Glow Up",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🏚️ Pick a room → get a 4-stage transformation: derelict → stripped → renovated → modern. 🎬 → Locked-camera timelapse video prompts that recreate the viral “building upgrade” look.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 1,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/06/Gaming-Purple-C.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:47.234Z"
+}

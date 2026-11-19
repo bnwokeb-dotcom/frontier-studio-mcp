@@ -1,0 +1,23 @@
+{
+  "id": "AC91",
+  "name": "Cast Swap",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Swap anyone in a video for yourself or any character: it scans the clip, maps your images to the people you pick, and writes one timestamped video-to-video prompt that keeps every move, cut and second.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 8,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/cast-swap-icon-72x72-1.webp",
+  "use_when": "The user wants to put themselves or a character into a movie scene, music video or TikTok, swap or recast an actor or singer, replace a person in a video with a reference image, restyle a clip while swapping its cast (anime, 3D animated, a show's own style), or fix a character swap that came out wrong.",
+  "produces": "A scan of the uploaded clip (exact duration, cuts, every person, a timestamped timeline), then one copy-ready video-to-video prompt that states the duration, maps each reference image to the person it replaces, carries whole-second timestamps from the real cuts, and comes with attach, settings, @-tag and tool-fit notes. Long clips are split into parts that add up exactly.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:41:30.733Z"
+}

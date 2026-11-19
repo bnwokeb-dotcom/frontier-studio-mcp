@@ -1,0 +1,23 @@
+{
+  "id": "AC4",
+  "name": "Abandoned Movie Scenes",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Type in any movie name, and get 5 high-detail prompts showing decayed, abandoned animatronic versions of its characters lifeless props left behind on a ruined set.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Abandoned-Movie-Scenes-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:03.687Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC5",
+  "name": "Animal Diving Image And Prompt Generator",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Create cinematic images and prompts of animals diving. Simply enter an animal, then select the height.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Animal-Diving-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:24.768Z"
+}

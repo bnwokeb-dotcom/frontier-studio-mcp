@@ -1,0 +1,23 @@
+{
+  "id": "AC86",
+  "name": "Lava Drop",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Generates a precisely timed 8–30-second photorealistic vertical video prompt for a fictional helicopter crewman dropping a giant object into an active lava lake, with material-specific impact physics, a cinematic payoff and a safe aftermath.",
+  "version": 11,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/09/lava-drop-icon-72x72-1.webp",
+  "use_when": "Use when the user wants a viral object-versus-lava video, a helicopter lava-drop stunt, object ideas for the format, or an exact 8–30-second photorealistic text-to-video prompt.",
+  "produces": "One self-contained English video-generation prompt with contiguous timestamps, 24 fps, vertical handheld helicopter framing, object-specific lava reactions, sound design and continuity constraints.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:41:57.495Z"
+}

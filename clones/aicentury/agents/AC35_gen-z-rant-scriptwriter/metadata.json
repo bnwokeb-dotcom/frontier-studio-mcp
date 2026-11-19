@@ -1,0 +1,23 @@
+{
+  "id": "AC35",
+  "name": "Gen-Z Rant Scriptwriter",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "💡 Give me an idea or a viral script, and I’ll make 5 Gen-Z rant scripts out of it!",
+  "version": 3,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Gen-Z-Rant-Scriptwriter-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:27.431Z"
+}

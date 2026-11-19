@@ -1,0 +1,23 @@
+{
+  "id": "AC65",
+  "name": "Retro Toons",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "Generate copy-ready Character Sheet, Storyboard, and Video prompts inspired by 1930 cartoon style",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 13,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/06/retro-toon-studio-icon-72x72-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:26.268Z"
+}

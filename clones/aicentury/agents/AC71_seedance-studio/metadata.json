@@ -1,0 +1,23 @@
+{
+  "id": "AC71",
+  "name": "Seedance Studio",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Cinematic prompt studio: film-grade character sheets, shot-by-shot storyboards, timed video prompts with or without dialogue, and five matching environments for one world, in your character's own style or one of ten styles.",
+  "version": 10,
+  "steps": 1,
+  "knowledge_docs_count": 5,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/ac71-seedance-studio-icon-72x72-1.webp",
+  "use_when": "The user wants a character sheet or turnaround from an idea or a reference image, a storyboard for a video idea, a timed video prompt with or without dialogue for Seedance or any video model, or backgrounds, environments, locations or sets for a character or a story: with or without a character image, matched to the character's look or in a style they pick (photoreal, anime, 2D cartoon, 3D animated, claymation, pixel art and more). Also when they want themselves in a video built from scratch, or a stylised version of themselves that Seedance accepts.",
+  "produces": "Copy-ready prompts, each in its own code block: a film-grade character sheet; a shot-by-shot storyboard with the shot count and length the user picks; a timed video prompt with or without dialogue, under 2,000 characters; or five standalone JSON background prompts for one world (1 main location and 4 connected places, each with camera angle, framing, lens, lighting and a negative prompt), empty so characters can be placed in later. Every answer ends with a next step, so a character, its world, its storyboard and its video connect.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:57.142Z"
+}

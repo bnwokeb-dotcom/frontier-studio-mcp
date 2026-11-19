@@ -1,0 +1,23 @@
+{
+  "id": "AC84",
+  "name": "Funny Animal Stunts",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Turns a character reference image, an animal, an environment and a 10- or 15-second duration into a finished photorealistic prompt for the viral animal-rider stunt: the rider approaches a ramp, launches with the animal, separates, rotates in the air, and lands back on the SAME animal.",
+  "version": 13,
+  "steps": 1,
+  "knowledge_docs_count": 4,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/09/funny-animal-stunts-icon-72x72-3.webp",
+  "use_when": "The user wants a viral animal stunt video, a bull-riding or elephant-jump flip clip, eyewitness-style smartphone footage of an impossible animal trick, or wants to recreate the mounted-launch-flip-remount format with a different character, animal or environment.",
+  "produces": "One finished photorealistic text-to-video prompt for a 10- or 15-second viral animal-rider stunt clip, with the closed-loop stunt beats and the camera treatment locked.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:00.246Z"
+}

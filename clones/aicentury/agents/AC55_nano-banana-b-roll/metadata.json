@@ -1,0 +1,23 @@
+{
+  "id": "AC55",
+  "name": "Nano Banana B-Roll",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Upload any image and get 5 B-roll JSON outputs for it, ready to use with Nano Banana.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Nano-Banana-B-Roll-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:45:05.880Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC79",
+  "name": "Topiary Shorts",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🌿 Turns any animal or object into luxury garden topiary prompts. ➡️ Get ready-to-use text-to-image and text-to-video prompts in seconds.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Topiary-Shorts-Profile-Picture.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:10.143Z"
+}

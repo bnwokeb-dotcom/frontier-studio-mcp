@@ -1,0 +1,23 @@
+{
+  "id": "AC20",
+  "name": "Documentary style 3D Image generator",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "Create cinematic 3D Images and b-roll shots designed for documentaries, interviews, and storytelling. Upload a photo or describe your scene to generate ultra-realistic, featureless humanoid visuals in minimalistic environments—perfect for professional documentary production.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Documentary-style-3D-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:36.623Z"
+}

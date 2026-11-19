@@ -1,0 +1,23 @@
+{
+  "id": "AC60",
+  "name": "Pet Comedy",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🐾 Upload your pet → get a funny, photoreal comedy story starring them. 🎬 Character → storyboard → timestamped video prompts, shot by shot.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 5,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/08/pet-show-72x72-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:11.948Z"
+}

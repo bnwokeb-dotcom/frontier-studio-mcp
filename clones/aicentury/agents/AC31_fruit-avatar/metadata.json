@@ -1,0 +1,23 @@
+{
+  "id": "AC31",
+  "name": "Fruit Avatar",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "• ✏️ Give a short description (or just a fruit) • 🎨 Get a high-quality text-to-image prompt • 🖼️ Generate clean reference images • 🎬 Use them for series, shorts, and videos",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Fruit-Avatar-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:17.231Z"
+}

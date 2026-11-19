@@ -1,0 +1,23 @@
+{
+  "id": "AC50",
+  "name": "Mechanical Toy Creator",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "🤖 Subject → Mechanical Pod → Transformer-Style Reveal 📦 Get 6 related models with ready-to-use image and video prompts for viral AI shorts.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/05/Mechanical-Toy-Creator.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:42:51.685Z"
+}

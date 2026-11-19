@@ -1,0 +1,23 @@
+{
+  "id": "AC78",
+  "name": "Time Travel Vlog",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "Create cinematic selfie-vlog prompts for text-to-image and text-to-video generation in any setting 🌍",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Time-Travel-Vlog-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:12.431Z"
+}

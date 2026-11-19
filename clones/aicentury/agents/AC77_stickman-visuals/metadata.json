@@ -1,0 +1,23 @@
+{
+  "id": "AC77",
+  "name": "Stickman Visuals 🎨",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "Turns any user input (idea, script, or 1 image) into 7 consistent stickman text-to-image prompts.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/Stickman-Visuals-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:41.390Z"
+}

@@ -1,0 +1,23 @@
+{
+  "id": "AC54",
+  "name": "Environment Maker",
+  "category": "Cinematic Filmmaking",
+  "category_slug": "cinematic-filmmaking",
+  "summary": "Five connected cinematic environments from one world: empty movie-set backgrounds for your characters. Upload a character to match its look, or pick one of 30 styles (anime, 2D, 3D, photoreal and more), or just name a place, and get copy-ready JSON image prompts.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 7,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/10/environment-maker-icon-72x72-1.webp",
+  "use_when": "You want backgrounds, environments, locations or movie sets for your characters; you want a whole world built around a character image; you want a place in anime, 2D, 3D or photoreal style; you want more locations from the same world; or you want a prompt that puts your character into one of the sets.",
+  "produces": "Five standalone JSON text-to-image prompts per request: one direct match plus four related locations from the same world, each with camera angle, framing, lens, lighting and a full prompt text. Empty by default, with extras on request. Also a style menu of 30 looks, location ideas, a chain prompt that ties the five sets to your first render, and a prompt that places your character into a set.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:45:09.697Z"
+}

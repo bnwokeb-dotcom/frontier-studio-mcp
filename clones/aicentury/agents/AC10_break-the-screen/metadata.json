@@ -1,0 +1,23 @@
+{
+  "id": "AC10",
+  "name": "Break The Screen",
+  "category": "YouTube Automation",
+  "category_slug": "youtube-automation",
+  "summary": "🎬 Pick a movie scene + an effect → a ready-made image + video prompt where the film bursts out of the cinema screen. 💥 Water, fire, jungle, sand or your own → viral \"4D cinema\" clips in seconds.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 1,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/07/break-the-screen-studio-icon-72x72-1.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:44:22.768Z"
+}

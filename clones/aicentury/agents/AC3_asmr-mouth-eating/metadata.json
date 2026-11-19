@@ -1,0 +1,23 @@
+{
+  "id": "AC3",
+  "name": "ASMR Mouth Eating 👄🍬 🍭 🍯 🍇",
+  "category": "AI Shorts",
+  "category_slug": "ai-shorts",
+  "summary": "This GPT creates ultra-realistic candy-in-mouth ASMR prompts: 1 main, 4 matching (same reference style, only the food changes), and 5 eating video prompts.",
+  "version": 4,
+  "steps": 1,
+  "knowledge_docs_count": 0,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/04/ASMR-Mouth-Eating-Icon.webp",
+  "use_when": "",
+  "produces": "",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:43:40.826Z"
+}

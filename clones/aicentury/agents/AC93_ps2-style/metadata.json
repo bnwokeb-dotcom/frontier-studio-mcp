@@ -1,0 +1,23 @@
+{
+  "id": "AC93",
+  "name": "PS2 Style",
+  "category": "Styles",
+  "category_slug": "styles",
+  "summary": "Turn any idea, your city, a game or your own brand into prompts in the 2000s PS2 game look, like GTA San Andreas. Free Style videos of 5 to 15 seconds, the viral \"how X must feel like\" reel, brand promos, character sheets from your photo and empty game worlds.",
+  "version": 5,
+  "steps": 1,
+  "knowledge_docs_count": 14,
+  "icon": "https://aicenturies.com/wp-content/uploads/2026/11/ps2-style-icon-72x72-1.webp",
+  "use_when": "You want a PS2 or GTA San Andreas style image or video; a retro low-poly game look; to turn yourself into a PS2 game character from a photo; the viral \"how [city, game, film] must feel like\" reel; your clothing brand or product in a PS2 game promo; empty PS2 game environments; or the next shot after an image you already made.",
+  "produces": "Copy-ready image prompts (single shot, panel shot or continue from your image), each with its matching timestamped video prompt in the same reply; 5 to 15 second Free Style videos; the 8-shot Nostalgia reel with an edit plan and cut points; promo shots built around your product photo; a four-view character sheet; connected empty environments; idea menus of 10 and five next-shot ideas under every shot; model, attach and settings lines for GPT Image 2 and Wan 3.0; optional generation through the OpenArt or Higgsfield MCP.",
+  "step_titles": [
+    {
+      "n": 1,
+      "title": "Instructions",
+      "expects": "none",
+      "step_type": "instruction"
+    }
+  ],
+  "kind": "instructions",
+  "scraped_at": "2026-11-19T07:41:42.847Z"
+}
