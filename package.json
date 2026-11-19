@@ -14,6 +14,7 @@
     "dev": "tsx src/server.ts",
     "push": "node scripts/github-push.mjs",
     "render:parallel": "node scripts/render-parallel.mjs",
+    "vidux:server": "node scripts/vidux-server.mjs",
     "aicentury:mcp": "node clones/aicentury/server.mjs",
     "aicentury:clone": "node scripts/clone-aicentury.mjs"
   },
