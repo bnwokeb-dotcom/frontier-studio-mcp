@@ -50,7 +50,13 @@ describe('MCP registry tools', () => {
   it('exposes MCP directorial prompts for AI agents (Claude, ChatGPT)', async () => {
     const res = await client.listPrompts();
     const promptNames = res.prompts.map((p) => p.name).sort();
-    expect(promptNames).toEqual(['cinematographer_shot_designer', 'commercial_ad_architect', 'director_breakdown', 'soundstage_master']);
+    expect(promptNames).toEqual([
+      'cinematographer_shot_designer',
+      'commercial_ad_architect',
+      'director_breakdown',
+      'skit_director_architect',
+      'soundstage_master',
+    ]);
   });
 
   it('film_create → film_show round trip', async () => {

@@ -58,4 +58,24 @@ describe('AI Century Cloned Engine & Knowledge Base', () => {
     expect(ac44).toBeDefined();
     expect(ac44.name).toBe('Kling AI Studio');
   });
+
+  it('should provide upgraded Caveman Chronicles with 4-beat acting and continuous chaining', async () => {
+    const { CAVEMAN_SERIES } = await import('../../clones/aicentury/upgraded/caveman_chronicles.js').catch(async () => {
+      return await import('../../clones/aicentury/upgraded/caveman_chronicles.ts');
+    });
+
+    expect(CAVEMAN_SERIES.length).toBeGreaterThanOrEqual(2);
+    const ep1 = CAVEMAN_SERIES[0];
+    expect(ep1.title).toBe('The Fire God in the Glass');
+    expect(ep1.shots.length).toBe(4);
+
+    // Verify shot 2 chains from shot 1
+    expect(ep1.shots[1].continuity).toBe('continuous');
+    expect(ep1.shots[1].chain_from_shot_id).toBe('ep01_shot_01');
+
+    // Verify acting micro-expressions and Foley SFX are present
+    expect(ep1.shots[0].acting_performance.micro_expressions).toContain('sniffing');
+    expect(ep1.shots[0].foley_sfx.length).toBeGreaterThan(0);
+    expect(ep1.shots[1].acting_performance.emotion).toContain('terror');
+  });
 });

@@ -102,6 +102,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             dialogue: { type: 'string', description: 'Spoken dialogue if present' }
           }
         }
+      },
+      {
+        name: 'aicentury_upgrade_skill',
+        description: 'Upgrade any raw AI Century skill (AC1 to AC93) from a flat static prompt into an acting-driven, multi-shot comedic skit or cinematic episodic narrative with micro-expressions, slapstick vectors, Foley audio, and tail-frame continuous chaining.',
+        inputSchema: {
+          type: 'object',
+          required: ['agent_id'],
+          properties: {
+            agent_id: { type: 'string', description: 'Raw AI Century skill ID (e.g. AC78, AC71, AC91, AC9, AC86)' },
+            upgrade_mode: {
+              type: 'string',
+              enum: ['comedic_skit_series', 'cinematic_drama', 'commercial_skit_ad', 'viral_stunt_choreography'],
+              default: 'comedic_skit_series',
+              description: 'The narrative and acting upgrade architecture'
+            },
+            character_flaw: { type: 'string', description: 'Comic obsession, flaw, or dramatic motivation' },
+            aspect_ratio: {
+              type: 'string',
+              enum: ['9:16', '16:9', '1:1'],
+              default: '9:16',
+              description: 'Target aspect ratio'
+            }
+          }
+        }
       }
     ]
   };
@@ -316,6 +340,122 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         {
           type: 'text',
           text: JSON.stringify(frontierShotPayload, null, 2)
+        }
+      ]
+    };
+  }
+
+  if (name === 'aicentury_upgrade_skill') {
+    const targetId = String(args.agent_id).toUpperCase().trim();
+    const mode = args.upgrade_mode || 'comedic_skit_series';
+    const ratio = args.aspect_ratio || '9:16';
+    const flaw = args.character_flaw || 'comic misunderstanding of reality';
+
+    const agentMeta = catalog.find((a) => a.id.toUpperCase() === targetId);
+    if (!agentMeta) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: `Skill '${targetId}' not found in local catalog.` }]
+      };
+    }
+
+    // Special Benchmark: AC78 Caveman / Time Travel Vlog
+    if (targetId === 'AC78') {
+      const { CAVEMAN_SERIES } = await import('./upgraded/caveman_chronicles.js').catch(async () => {
+        // Fallback for tsx / node esm
+        return await import('./upgraded/caveman_chronicles.ts');
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'UPGRADED_TO_PRO_SKIT_SERIES',
+                original_skill: { id: agentMeta.id, name: agentMeta.name },
+                upgrade_doctrine: '4-Beat Physical Comedy & Serialized Continuity Engine',
+                series_title: 'Grok Unfiltered: Prehistoric Tech Chronicles',
+                episodes_ready: CAVEMAN_SERIES.length,
+                preview_episode: CAVEMAN_SERIES[0],
+                execution_command: 'npm run render:parallel -- --shots=ep01_shot_01,ep01_shot_02,ep01_shot_03,ep01_shot_04'
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+
+    // Universal Pro Upgrader for all other 74 skills
+    const upgradedPlan = {
+      status: 'UPGRADED_TO_PRO_DIRECTOR_ENGINE',
+      original_skill: { id: agentMeta.id, name: agentMeta.name, category: agentMeta.category },
+      upgrade_mode: mode,
+      aspect_ratio: ratio,
+      core_critic_fix: 'Eliminated static diorama display mode; injected 4-beat acting kinetics, comedic/dramatic tension, diegetic Foley, and tail-frame continuous chaining.',
+      character_acting_profile: {
+        dominant_flaw: flaw,
+        micro_expressions: 'extreme eye-darts, jaw unhinge, manic brow furrow, rapid nostril flare, genuine performance physics',
+        body_language: 'unstable weight shifts, physical collision with props, comedic timing pauses'
+      },
+      beats: [
+        {
+          beat_number: 1,
+          shot_id: `${targetId.toLowerCase()}_beat_01`,
+          duration_sec: 4,
+          aspect_ratio: ratio,
+          continuity: 'new_setup',
+          beat_goal: 'The Inciting Collision / Absurd Setup',
+          camera: 'dynamic low-angle push-in with motivated natural lighting',
+          foley_sfx: ['immediate environmental acoustic impact', 'breathing / vocal intake', 'prop interaction sound']
+        },
+        {
+          beat_number: 2,
+          shot_id: `${targetId.toLowerCase()}_beat_02`,
+          duration_sec: 4,
+          aspect_ratio: ratio,
+          continuity: 'continuous',
+          chain_from_shot_id: `${targetId.toLowerCase()}_beat_01`,
+          beat_goal: 'Physical Misunderstanding & Escalation',
+          camera: 'rapid handheld swivel, rack-focus to reacting character',
+          foley_sfx: ['diegetic mechanical/physical noise', 'stifled gasp or aggressive dialogue stem']
+        },
+        {
+          beat_number: 3,
+          shot_id: `${targetId.toLowerCase()}_beat_03`,
+          duration_sec: 4,
+          aspect_ratio: ratio,
+          continuity: 'continuous',
+          chain_from_shot_id: `${targetId.toLowerCase()}_beat_02`,
+          beat_goal: 'The Panic & Catastrophic Climax',
+          camera: 'unstable Dutch tilt, whip-pan, or accidental drop vector',
+          foley_sfx: ['high-stress acoustic peak', 'clattering prop impact', 'surrounding environment reaction']
+        },
+        {
+          beat_number: 4,
+          shot_id: `${targetId.toLowerCase()}_beat_04`,
+          duration_sec: 4,
+          aspect_ratio: ratio,
+          continuity: 'continuous',
+          chain_from_shot_id: `${targetId.toLowerCase()}_beat_03`,
+          beat_goal: 'The Hard Punchline & Series Hook',
+          camera: 'deadpan direct-to-lens stare or stunned wide freeze',
+          foley_sfx: ['awkward room tone silence', 'lone environmental echo', 'comedic low stinger']
+        }
+      ],
+      execution: {
+        tool: 'frontier-studio-mcp render_shot with continuous chaining',
+        parallel_batch: 'npm run render:parallel',
+        color_grade: 'film_grade with era: commercial_ad or contemporary'
+      }
+    };
+
+    return {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify(upgradedPlan, null, 2)
         }
       ]
     };

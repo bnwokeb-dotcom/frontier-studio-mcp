@@ -171,4 +171,53 @@ COMMERCIAL AD PRODUCTION PROTOCOL:
       };
     },
   );
+
+  // 5. Skit & Acting Director Architect (High-Comedy Narrative & Hot Series Standard)
+  server.prompt(
+    'skit_director_architect',
+    'Architects dynamic, multi-shot comedy skits and hot series episodes with expressive acting, physical slapstick, diegetic Foley, and continuous frame chaining.',
+    {
+      skit_title: z.string().describe('Title or premise of the skit / episode'),
+      comedy_style: z.enum(['fish_out_of_water', 'slapstick_physical', 'deadpan_satire', 'chaotic_escalation', 'mockumentary']).describe('Comic delivery tone'),
+      main_character: z.string().describe('Character identity, flaw, and comic obsession (e.g. "Grok: neanderthal who believes iPhone is a hostile fire god")'),
+      environment: z.string().describe('Setting with physical interactive props (e.g. "20,000 BC mossy boulder cave with modern unboxing package")'),
+      aspect_ratio: z.enum(['9:16', '16:9', '1:1']).default('9:16').describe('Aspect ratio for viral shorts or widescreen'),
+    },
+    async (args) => {
+      return {
+        description: 'High-Comedy Skit & Episodic Directing Blueprint',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are the Comedy Showrunner and Director staging a viral narrative skit: "${args.skit_title}".
+Comedy Style: ${args.comedy_style} | Character: ${args.main_character} | Setting: ${args.environment} | Ratio: ${args.aspect_ratio}
+
+SKIT ACTING & PRODUCTION PROTOCOL (NO STATIC DISPLAY MODE):
+1. CHARACTER REGISTRATION WITH ACTING FLAWS:
+   - Call \`asset_register\` with kind: 'character'. MUST include an \`acting\` block detailing extreme micro-expressions: jaw drops, frantic eyebrow twitches, manic grins, pupil dilations, and physical tics.
+   - Register distinct voice profiles with \`voice\` (pitch, speed, cadence).
+   - Call \`character_sheet_build\` to freeze their turnaround identity.
+
+2. 4-BEAT EPISODIC COMEDY STRUCTURE:
+   - BEAT 1 (0–4s, The Absurd Collision): Inciting comic collision. Character encounters the alien element. Action is active, physical, and immediate—smelling, biting, or poking the prop.
+   - BEAT 2 (4–8s, The Physical Misunderstanding): Escalation through comic error. Chained from Beat 1 (\`chain_from_shot_id: 'shot_01'\`, \`continuity: 'continuous'\`). Character applies primitive or inappropriate logic to modern technology.
+   - BEAT 3 (8–12s, The Panic & Climax): Catastrophic reaction. The prop responds (digital chime, flashlight blinding, Siri speaking). Chained from Beat 2. Wild camera movement (whip-pan, sudden tilt, accidental drop into mud).
+   - BEAT 4 (12–15s, The Hard Punchline & Series Hook): The visual or verbal punchline. Deadpan stare directly into lens or absurd ritual homage. Cliffhanger hook for the next episode in the series.
+
+3. DIEGETIC FOLEY & AUDIO STAGING:
+   - Call \`soundscape_build\` to create rich environmental Foley: crunchy footsteps, stone scrapes, clothing rustle, breath gasps, digital synth beeps.
+   - Call \`dialogue_render\` for punchy spoken lines or grunted vocalizations.
+   - Call \`acoustic_match\` to ensure room tone reverb matches the physical space.
+
+4. CONTINUITY CHAINING EXECUTION:
+   - Use Frontier Studio's native tail-frame injection: every chained shot inherits the exact pose and position from the previous shot's downloaded \`tail_frame.png\`.
+   - Batch-render all 4 beats in parallel via \`npm run render:parallel\`.`,
+            },
+          },
+        ],
+      };
+    },
+  );
 }
