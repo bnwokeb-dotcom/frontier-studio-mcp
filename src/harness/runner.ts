@@ -12,7 +12,7 @@ export interface AutonomousProductionGoal {
   title: string;
   logline: string;
   budget_usd: number;
-  niche: 'ugc_ecommerce_ads' | 'episodic_skit_comedy' | 'faceless_deep_dive_3d' | 'hollywood_prestige_directing';
+  niche: 'ugc_ecommerce_ads' | 'episodic_skit_comedy' | 'faceless_deep_dive_3d' | 'hollywood_prestige_directing' | 'stream_clips_repurpose' | 'kinetic_motion_graphics';
   aspect_ratio: '9:16' | '16:9';
   target_model?: 'minimax-h3' | 'omniflash-1.2' | 'kling-4';
   characters?: Array<{
