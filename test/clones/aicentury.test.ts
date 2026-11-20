@@ -78,4 +78,14 @@ describe('AI Century Cloned Engine & Knowledge Base', () => {
     expect(ep1.shots[0].foley_sfx.length).toBeGreaterThan(0);
     expect(ep1.shots[1].acting_performance.emotion).toContain('terror');
   });
+
+  it('should upgrade AC93 PS2 / GTA style from isolated prompts into multi-character ensemble skits', async () => {
+    const { createGtaEpisode01 } = await import('../../src/narrative/ensemble_skit.js');
+    const ep = createGtaEpisode01();
+    expect(ep.universe).toBe('gta_los_santos_chronicles');
+    expect(ep.characters.length).toBe(2);
+    expect(ep.beats.length).toBe(4);
+    expect(ep.characters[0].id).toBe('char_marcus');
+    expect(ep.characters[1].id).toBe('char_npc_clerk');
+  });
 });

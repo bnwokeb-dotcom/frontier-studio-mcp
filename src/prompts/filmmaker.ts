@@ -179,11 +179,13 @@ COMMERCIAL AD PRODUCTION PROTOCOL:
     {
       skit_title: z.string().describe('Title or premise of the skit / episode'),
       comedy_style: z.enum(['fish_out_of_water', 'slapstick_physical', 'deadpan_satire', 'chaotic_escalation', 'mockumentary']).describe('Comic delivery tone'),
-      main_character: z.string().describe('Character identity, flaw, and comic obsession (e.g. "Grok: neanderthal who believes iPhone is a hostile fire god")'),
-      environment: z.string().describe('Setting with physical interactive props (e.g. "20,000 BC mossy boulder cave with modern unboxing package")'),
+      main_character: z.string().describe('Protagonist identity, flaw, and comic obsession (e.g. "Marcus: impatient street hustler in green bomber jacket")'),
+      supporting_cast: z.string().optional().describe('Secondary character, rival, or glitched NPC (e.g. "Dale: unblinking gas station clerk repeating idle animations")'),
+      environment: z.string().describe('Setting with physical interactive props (e.g. "24/7 Vinewood Minimart counter with flickering neon")'),
       aspect_ratio: z.enum(['9:16', '16:9', '1:1']).default('9:16').describe('Aspect ratio for viral shorts or widescreen'),
     },
     async (args) => {
+      const castNotice = args.supporting_cast ? `Supporting Cast / NPC: ${args.supporting_cast} | ` : '';
       return {
         description: 'High-Comedy Skit & Episodic Directing Blueprint',
         messages: [
@@ -192,19 +194,20 @@ COMMERCIAL AD PRODUCTION PROTOCOL:
             content: {
               type: 'text',
               text: `You are the Comedy Showrunner and Director staging a viral narrative skit: "${args.skit_title}".
-Comedy Style: ${args.comedy_style} | Character: ${args.main_character} | Setting: ${args.environment} | Ratio: ${args.aspect_ratio}
+Comedy Style: ${args.comedy_style} | Main Character: ${args.main_character} | ${castNotice}Setting: ${args.environment} | Ratio: ${args.aspect_ratio}
 
-SKIT ACTING & PRODUCTION PROTOCOL (NO STATIC DISPLAY MODE):
-1. CHARACTER REGISTRATION WITH ACTING FLAWS:
-   - Call \`asset_register\` with kind: 'character'. MUST include an \`acting\` block detailing extreme micro-expressions: jaw drops, frantic eyebrow twitches, manic grins, pupil dilations, and physical tics.
-   - Register distinct voice profiles with \`voice\` (pitch, speed, cadence).
-   - Call \`character_sheet_build\` to freeze their turnaround identity.
+SKIT ACTING & ENSEMBLE PRODUCTION PROTOCOL (NO STATIC DISPLAY MODE):
+1. MULTI-CHARACTER ENSEMBLE REGISTRATION:
+   - Call \`asset_register\` for the protagonist AND supporting cast / NPCs.
+   - Every character MUST include an \`acting\` block detailing micro-expressions: jaw unhinge, frantic eye-darts, stiff NPC head-bobbing, pupil flares, and posture quirks.
+   - Register distinct voice profiles with \`voice\` (pitch, speed, cadence, timbre) so character lines contrast sharply.
+   - Call \`character_sheet_build\` to freeze turnaround sheets for both characters.
 
-2. 4-BEAT EPISODIC COMEDY STRUCTURE:
-   - BEAT 1 (0–4s, The Absurd Collision): Inciting comic collision. Character encounters the alien element. Action is active, physical, and immediate—smelling, biting, or poking the prop.
-   - BEAT 2 (4–8s, The Physical Misunderstanding): Escalation through comic error. Chained from Beat 1 (\`chain_from_shot_id: 'shot_01'\`, \`continuity: 'continuous'\`). Character applies primitive or inappropriate logic to modern technology.
-   - BEAT 3 (8–12s, The Panic & Climax): Catastrophic reaction. The prop responds (digital chime, flashlight blinding, Siri speaking). Chained from Beat 2. Wild camera movement (whip-pan, sudden tilt, accidental drop into mud).
-   - BEAT 4 (12–15s, The Hard Punchline & Series Hook): The visual or verbal punchline. Deadpan stare directly into lens or absurd ritual homage. Cliffhanger hook for the next episode in the series.
+2. PURPOSEFUL NARRATIVE BEAT SPINES (ESTABLISH → DIALOGUE VOLLEY → ESCALATION → BUTTON):
+   - BEAT 1 (0–4s, The Inciting Two-Shot): Wide establishing shot framing both characters in the locked geometry (\`sequence_lock_geo\`). The protagonist encounters the conflict or ridiculous obstacle.
+   - BEAT 2 (4–8s, Shot-Reverse-Shot Dialogue Volley): Over-The-Shoulder (OTS) on Character A delivering the setup punchline. Camera enforces the 180-degree rule.
+   - BEAT 3 (8–12s, The Reaction & Physical Escalation): Reverse OTS or close-up on Character B reacting with unhinged micro-acting (e.g. NPC glitching, deadpan stare, comic panic). Chained continuously (\`continuity: 'continuous'\`).
+   - BEAT 4 (12–16s, The Climax & Button): Comedic consequence or sudden visual twist (e.g. GTA wanted stars lighting up, physics engine freakout, sudden sirens). Ends on a cliffhanger hook for Episode 2.
 
 3. DIEGETIC FOLEY & AUDIO STAGING:
    - Call \`soundscape_build\` to create rich environmental Foley: crunchy footsteps, stone scrapes, clothing rustle, breath gasps, digital synth beeps.

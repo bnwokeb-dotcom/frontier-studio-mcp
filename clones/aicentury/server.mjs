@@ -387,6 +387,35 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    // Special Benchmark: AC93 PS2 / GTA Style -> Serialized Multi-Character Skits
+    if (targetId === 'AC93') {
+      const { createGtaEpisode01 } = await import('../../dist/src/narrative/ensemble_skit.js').catch(async () => {
+        return await import('../../src/narrative/ensemble_skit.js');
+      });
+      const gtaEp = createGtaEpisode01();
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify(
+              {
+                status: 'UPGRADED_TO_PRO_ENSEMBLE_SKIT',
+                original_skill: { id: agentMeta.id, name: agentMeta.name },
+                upgrade_doctrine: 'Multi-Character Ensemble & Purposeful Skit Architecture (No Isolated Prompts)',
+                series_title: 'Grand Theft Life: Los Santos NPC Chronicles',
+                characters_cast: gtaEp.characters.map((c) => ({ id: c.id, name: c.name, archetype: c.archetype })),
+                preview_episode: gtaEp,
+                cinematic_grammar: 'Wide establishing 2-shot -> OTS Dialogue Volley -> Reverse OTS Reaction -> Comedic Climax Button',
+                execution_command: 'npm run render:parallel -- --shots=gta_ep01_shot_01,gta_ep01_shot_02,gta_ep01_shot_03,gta_ep01_shot_04'
+              },
+              null,
+              2
+            )
+          }
+        ]
+      };
+    }
+
     // Universal Pro Upgrader for all other 74 skills
     const upgradedPlan = {
       status: 'UPGRADED_TO_PRO_DIRECTOR_ENGINE',
