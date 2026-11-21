@@ -19,6 +19,12 @@
       "command": "node",
       "args": ["clones/aicentury/server.mjs"],
       "note": "Offline cloned high-speed AI Century engine with local full-text search, direct prompt retrieval, and instant conversion to Frontier Studio render scenes."
+    },
+    "googleflow": {
+      "command": "c:/Users/hp/Documents/PROJECTS/googleflow_mcp/.venv/Scripts/python.exe",
+      "args": ["-m", "src.server"],
+      "cwd": "c:/Users/hp/Documents/PROJECTS/googleflow_mcp",
+      "note": "Google Flow custom agentic MCP engine: Imagen 3 (imagen-3.0-generate-002), Google AI Studio & Journey TTS voices, and Hollywood Showrunner cinematic storyboarding."
     }
   }
 }
