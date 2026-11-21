@@ -3,4 +3,6 @@ dist/
 .env
 *.log
 scratch/
+studio_data/
+.mimosa/
 clones/nafay3d/zips/

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "dev": "tsx src/server.ts",
     "push": "node scripts/github-push.mjs",
+    "stage:colossus": "node scripts/stage-colossus.mjs",
     "render:parallel": "node scripts/render-parallel.mjs",
     "vidux:server": "node scripts/vidux-server.mjs",
     "aicentury:mcp": "node clones/aicentury/server.mjs",
