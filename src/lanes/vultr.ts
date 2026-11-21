@@ -207,14 +207,19 @@ export class VultrLane implements VideoLane {
   private async fetchModels(): Promise<Set<string>> {
     const raw = await this.send('GET', `${VultrLane.BASE_URL}/videos/models`, 'models');
     const json = this.parseJsonObject(raw, 'Vultr models catalog');
-    if (!Array.isArray(json.models)) {
+    const list = Array.isArray(json.models)
+      ? json.models
+      : Array.isArray(json.data)
+        ? json.data
+        : null;
+    if (!list) {
       throw errLaneDown(
-        'Vultr models catalog has no models array (unexpected response shape)',
+        'Vultr models catalog has no models or data array (unexpected response shape)',
         'check GET /v1/videos/models',
       );
     }
     const ids = new Set<string>();
-    for (const entry of json.models as unknown[]) {
+    for (const entry of list as unknown[]) {
       if (typeof entry === 'string') {
         ids.add(entry);
       } else if (entry !== null && typeof entry === 'object') {
