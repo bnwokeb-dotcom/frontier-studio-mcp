@@ -13,6 +13,7 @@ import { loadConfig } from '../src/config.js';
 import { VultrLane } from '../src/lanes/vultr.js';
 import { composeH3Prompt } from '../src/tools/h3prompt.js';
 import { ensureBudget, recordSpend } from '../src/budget.js';
+import { auditTake } from '../src/qa/critic.js';
 
 const execFile = promisify(execFileCb);
 
@@ -180,6 +181,24 @@ while (activeJobs.size > 0 && Date.now() < deadline) {
         await writeFile(mp4Path, art.data);
         await extractTailFrame(mp4Path, tailPath);
 
+        // ── Automated VLM Quality Critic Gate (Universal Gauntlet) ───────────────
+        console.log(`🧐 [CRITIC GATE] Auditing Shot ${meta.shot.id} for visual coherence & identity...`);
+        const critic = await auditTake({
+          mp4Path,
+          shotId: meta.shot.id,
+          expectedAction: meta.shot.action,
+          durationS: meta.durationS,
+          criticApiKey: cfg.geminiApiKey,
+          threshold: 8.5,
+        });
+
+        console.log(
+          `📊 [CRITIC RESULT] ${meta.shot.id} -> Score: ${critic.score}/10 [Verdict: ${critic.verdict.toUpperCase()}]`
+        );
+        if (critic.reasons.length > 0) {
+          console.log(`   Notice: ${critic.reasons.join(', ')}`);
+        }
+
         const delta = art.costUsd - meta.estimate;
         if (Math.abs(delta) > 0.001) await recordSpend(paths, filmId, delta);
         await appendLine(
@@ -190,12 +209,19 @@ while (activeJobs.size > 0 && Date.now() < deadline) {
             lane: 'vultr',
             film_id: filmId,
             cost_usd: delta,
-            verdict: 'pending',
+            verdict: critic.verdict,
             job_id: jobId,
             artifact_path: mp4Path,
-            note: 'reconcile',
+            critic_score: critic.score,
+            critic_reasons: critic.reasons,
+            note: 'reconcile_with_critic',
           })
         );
+
+        if (critic.verdict === 'rejected') {
+          console.warn(`⚠️ [QUALITY FAIL] Shot ${meta.shot.id} rejected by Quality Gate. Flagged for retake.`);
+          continue;
+        }
 
         console.log(`💾 Saved ${mp4Path} (Cost: $${art.costUsd.toFixed(2)})`);
         completedShots.set(meta.shot.id, { mp4Path, tailPath, costUsd: art.costUsd });
