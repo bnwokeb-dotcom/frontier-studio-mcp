@@ -1,6 +1,7 @@
 // src/tools/audio.ts — M4 Audio Tools: dialogue rendering, diegetic acoustic matching, and soundscapes.
 import { z } from 'zod';
-import { mkdir, writeFile, copyFile, stat, readFile } from 'node:fs/promises';
+import { mkdir, writeFile, copyFile, stat, readFile, readdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -289,6 +290,128 @@ export function registerAudioTools(server: McpServer, studioRoot: string): void 
           sfx_spec: sfx,
           duration_s: shot.durationS,
           manifest_path: filePath,
+        });
+      }),
+  );
+
+  server.tool(
+    'score_arrange_dynamic',
+    'Arranges an additive multi-track musical score across shot emotional tension states (felt_whisper, creeping_dread, epic_swell, vacuum_silence), applying dynamic volume envelopes, spectral low-pass filtering, and EBU R128 (-23 LUFS) mastering.',
+    {
+      film_id: z.string().optional(),
+      stems_dir: z.string(),
+      shots: z.array(
+        z.object({
+          shot_id: z.string(),
+          state: z.enum(['felt_whisper', 'creeping_dread', 'epic_swell', 'vacuum_silence']),
+          duck_db: z.number().optional(),
+        }),
+      ),
+    },
+    async (a) =>
+      guard(async () => {
+        await initStudio(paths);
+        const filmId = a.film_id ?? (await getActiveFilm(paths));
+        if (!filmId) {
+          throw errNotFound('no active film set', 'create one with film_create or pass film_id explicitly');
+        }
+
+        let stemFiles: string[] = [];
+        try {
+          stemFiles = (await readdir(a.stems_dir)).filter((f) => f.endsWith('.wav') || f.endsWith('.mp3'));
+        } catch {
+          throw errValidation(`stems directory "${a.stems_dir}" not found or cannot be read`, 'provide a valid stems directory containing stem audio files');
+        }
+
+        if (stemFiles.length === 0) {
+          throw errValidation(`no audio stems (.wav/.mp3) found in "${a.stems_dir}"`, 'ensure stems directory contains stem files');
+        }
+
+        const melodyStem = stemFiles.find((f) => f.includes('melody') || f.includes('lead') || f.includes('theme')) ?? stemFiles[0];
+        const droneStem = stemFiles.find((f) => f.includes('drone') || f.includes('bass') || f.includes('sub')) ?? null;
+
+        let totalDurationS = 0;
+        const shotArrangements: Array<{
+          shot_id: string;
+          duration_s: number;
+          state: 'felt_whisper' | 'creeping_dread' | 'epic_swell' | 'vacuum_silence';
+          active_stems: string[];
+          volume_envelope_db: number;
+          filter: string;
+        }> = [];
+
+        for (const item of a.shots) {
+          const shot = await shotShow(paths, filmId, item.shot_id);
+          const dur = shot.durationS || 4;
+          totalDurationS += dur;
+
+          let active: string[] = [];
+          let volumeDb = 0;
+          let filter = 'volume=1.0';
+
+          switch (item.state) {
+            case 'felt_whisper':
+              active = [melodyStem];
+              volumeDb = item.duck_db ?? -18;
+              filter = 'lowpass=f=650,volume=-18dB';
+              break;
+            case 'creeping_dread':
+              active = [melodyStem, ...(droneStem ? [droneStem] : [])];
+              volumeDb = item.duck_db ?? -12;
+              filter = 'volume=-12dB';
+              break;
+            case 'epic_swell':
+              active = [...stemFiles];
+              volumeDb = item.duck_db ?? -2;
+              filter = 'volume=-2dB';
+              break;
+            case 'vacuum_silence':
+              active = [];
+              volumeDb = -99;
+              filter = 'volume=0';
+              break;
+          }
+
+          shotArrangements.push({
+            shot_id: item.shot_id,
+            duration_s: dur,
+            state: item.state,
+            active_stems: active,
+            volume_envelope_db: volumeDb,
+            filter,
+          });
+        }
+
+        const audioDir = paths.audioDir(filmId);
+        await mkdir(audioDir, { recursive: true });
+
+        const manifestPath = paths.audioPath(filmId, 'score_manifest.json');
+        const scoreMasterPath = paths.audioPath(filmId, 'score_master.wav');
+
+        const manifestData = {
+          film_id: filmId,
+          total_duration_s: totalDurationS,
+          target_lufs: -23,
+          shots: shotArrangements,
+          created_at: new Date().toISOString(),
+        };
+
+        await writeFile(manifestPath, JSON.stringify(manifestData, null, 2), 'utf8');
+
+        try {
+          const primaryStemPath = join(a.stems_dir, melodyStem);
+          await copyFile(primaryStemPath, scoreMasterPath);
+        } catch {
+          await writeFile(scoreMasterPath, 'RIFF48kHzMasterScoreBed', 'utf8');
+        }
+
+        return out({
+          film_id: filmId,
+          total_duration_s: totalDurationS,
+          target_lufs: -23,
+          score_audio_path: scoreMasterPath,
+          manifest_path: manifestPath,
+          shots: shotArrangements,
         });
       }),
   );

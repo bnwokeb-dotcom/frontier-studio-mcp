@@ -217,4 +217,63 @@ describe('Audio Tools', () => {
 
     expect(requestedVoiceName).toBe('en-US-Journey-D');
   });
+
+  it('score_arrange_dynamic constructs additive stem arrangement across emotional tension states', async () => {
+    // Create shots for this test
+    await client.callTool({
+      name: 'shot_create',
+      arguments: {
+        id: 'shot_s1',
+        sequence: 'seq01',
+        action: 'Close on eyes.',
+        geo_block: 'dense pine trees, deep snow',
+        refs: [{ asset_id: 'loc_forest', role: 'location' }],
+        camera: { lens: '50mm', move: 'static', reason: 'close up' },
+        duration_s: 4,
+      },
+    });
+    await client.callTool({
+      name: 'shot_create',
+      arguments: {
+        id: 'shot_s2',
+        sequence: 'seq01',
+        action: 'Titan rises.',
+        geo_block: 'dense pine trees, deep snow',
+        refs: [{ asset_id: 'loc_forest', role: 'location' }],
+        camera: { lens: '24mm', move: 'crane up', reason: 'epic reveal' },
+        duration_s: 6,
+      },
+    });
+
+    const stemsDir = join(root, 'mock_stems');
+    const { mkdir, writeFile } = await import('node:fs/promises');
+    await mkdir(stemsDir, { recursive: true });
+    await writeFile(join(stemsDir, 'stem_melody.wav'), 'RIFFMockMelodyData');
+    await writeFile(join(stemsDir, 'stem_sub_drone.wav'), 'RIFFMockDroneData');
+    await writeFile(join(stemsDir, 'stem_percussion.wav'), 'RIFFMockPercussionData');
+
+    const res = await client.callTool({
+      name: 'score_arrange_dynamic',
+      arguments: {
+        film_id: 'film_audio',
+        stems_dir: stemsDir,
+        shots: [
+          { shot_id: 'shot_s1', state: 'felt_whisper' },
+          { shot_id: 'shot_s2', state: 'epic_swell' },
+        ],
+      },
+    });
+
+    const content = (res as { content: Array<{ text: string }> }).content[0].text;
+    const data = JSON.parse(content);
+    expect(data.film_id).toBe('film_audio');
+    expect(data.shots.length).toBe(2);
+    expect(data.shots[0].state).toBe('felt_whisper');
+    expect(data.shots[0].active_stems).toContain('stem_melody.wav');
+    expect(data.shots[0].active_stems).not.toContain('stem_percussion.wav');
+    expect(data.shots[1].state).toBe('epic_swell');
+    expect(data.shots[1].active_stems).toContain('stem_melody.wav');
+    expect(data.shots[1].active_stems).toContain('stem_percussion.wav');
+    expect(data.target_lufs).toBe(-23);
+  });
 });
