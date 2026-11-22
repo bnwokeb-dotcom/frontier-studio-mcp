@@ -62,11 +62,20 @@ export async function assetRegister(paths: StudioPaths, filmId: string, input: A
       };
       await writeText(joinDir(dir, 'voice_profile.json'), JSON.stringify(profile, null, 2));
     }
-    if (input.biologicalMarkers) {
-      await writeText(joinDir(dir, 'biological_markers.json'), JSON.stringify(input.biologicalMarkers, null, 2));
-    }
+    let markers = input.biologicalMarkers;
     if (input.parentDna) {
       await writeText(joinDir(dir, 'parent_dna.txt'), input.parentDna.trim());
+      const parentDir = paths.assetDir(filmId, 'characters', input.parentDna.trim());
+      try {
+        const parentMarkersRaw = await readText(joinDir(parentDir, 'biological_markers.json'));
+        const parentMarkers = JSON.parse(parentMarkersRaw) as BiologicalMarkers;
+        markers = { ...parentMarkers, ...markers };
+      } catch {
+        // Parent may not define biological_markers.json
+      }
+    }
+    if (markers) {
+      await writeText(joinDir(dir, 'biological_markers.json'), JSON.stringify(markers, null, 2));
     }
   }
   if (input.kind === 'location' && input.geoBlock?.trim()) {

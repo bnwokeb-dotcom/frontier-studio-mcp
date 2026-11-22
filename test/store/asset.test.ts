@@ -69,4 +69,34 @@ describe('asset registry', () => {
     expect(profile.voiceId).toBe('corvus_clone_v1');
     expect(profile.provider).toBe('elevenlabs');
   });
+
+  it('child character inherits biological markers from parent_dna', async () => {
+    await assetRegister(paths, 'film_t', {
+      kind: 'character',
+      assetId: 'char_father',
+      descriptor: 'FATHER — tall Norse warrior.',
+      voice: 'booming baritone.',
+      acting: 'stoic.',
+      biologicalMarkers: {
+        irisColorHex: '#3d607a',
+        boneStructure: 'high cheekbones, straight Nordic bridge',
+        signatureMarks: 'diagonal scar across right brow',
+      },
+    });
+
+    const child = await assetRegister(paths, 'film_t', {
+      kind: 'character',
+      assetId: 'char_child',
+      descriptor: 'CHILD — 6-year-old boy in oversized fur cloak.',
+      voice: 'soft, timid whisper.',
+      acting: 'hides behind pillars.',
+      parentDna: 'char_father',
+    });
+
+    const markersFile = join(child.assetDir, 'biological_markers.json');
+    const childMarkers = JSON.parse(await readFile(markersFile, 'utf8'));
+    expect(childMarkers.irisColorHex).toBe('#3d607a');
+    expect(childMarkers.boneStructure).toContain('Nordic bridge');
+    expect(childMarkers.signatureMarks).toContain('diagonal scar');
+  });
 });

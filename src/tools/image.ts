@@ -235,7 +235,21 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
       );
     }
     const assetDir = paths.assetDir(filmId, kindDir, a.asset_id);
-    const descriptor = await readText(`${assetDir}/descriptor.md`);
+    let descriptor = await readText(`${assetDir}/descriptor.md`);
+    try {
+      const bioRaw = await readText(`${assetDir}/biological_markers.json`);
+      const bio = JSON.parse(bioRaw);
+      const parts: string[] = [];
+      if (bio.irisColorHex) parts.push(`exact iris color ${bio.irisColorHex}`);
+      if (bio.boneStructure) parts.push(`bone structure: ${bio.boneStructure}`);
+      if (bio.signatureMarks) parts.push(`distinctive facial markings: ${bio.signatureMarks}`);
+      if (bio.ethnicAncestry) parts.push(`ancestry: ${bio.ethnicAncestry}`);
+      if (parts.length > 0) {
+        descriptor += ` Biological consistency markers: ${parts.join(', ')}.`;
+      }
+    } catch {
+      // Character has no biological markers
+    }
 
     // 4. compose the sheet law (pure; VALIDATION on a whitespace-only descriptor)
     const prompt = characterSheetPrompt(descriptor);
