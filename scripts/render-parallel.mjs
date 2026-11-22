@@ -106,6 +106,7 @@ console.log(`📋 Loaded ${prepared.length} shots.`);
 // 2. Submit independent shots simultaneously in parallel
 const activeJobs = new Map(); // jobId -> { shotId, prompt, estimate, durationS }
 const completedShots = new Map(); // shotId -> { mp4Path, tailFramePath, costUsd }
+const retakeCounts = new Map(); // shotId -> retake attempt count
 
 async function submitJob(pShot, firstFrameBuffer) {
   const estimate = lane.estimatePrice({ prompt: pShot.prompt, durationS: pShot.durationS, aspectRatio: '16:9', quality: 'standard' });
@@ -219,7 +220,18 @@ while (activeJobs.size > 0 && Date.now() < deadline) {
         );
 
         if (critic.verdict === 'rejected') {
-          console.warn(`⚠️ [QUALITY FAIL] Shot ${meta.shot.id} rejected by Quality Gate. Flagged for retake.`);
+          const attempts = (retakeCounts.get(meta.shot.id) || 0) + 1;
+          retakeCounts.set(meta.shot.id, attempts);
+          if (attempts <= 2) {
+            console.warn(`🔁 [AUTO-RETAKE] Shot ${meta.shot.id} scored ${critic.score}/10. Launching Retake Take #${attempts + 1} with enhanced stabilization...`);
+            const plate = await findPlateForShot(meta.shot);
+            if (plate) {
+              const enhancedPrompt = `${meta.prompt}, absolute subject stability, high temporal coherence, zero warping, locked face geometry.`;
+              await submitJob({ ...meta, prompt: enhancedPrompt }, plate.data);
+            }
+          } else {
+            console.warn(`⚠️ [QUALITY ESCALATION] Shot ${meta.shot.id} failed after 2 retakes. Flagged for review.`);
+          }
           continue;
         }
 

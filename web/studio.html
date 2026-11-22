@@ -559,13 +559,18 @@
   </div>
 
   <script>
-    function triggerParallelRender() {
-      if (confirm('Dispatch all 8 shots concurrently to Vultr MiniMax H3 GPU cluster?')) {
-        alert('Render dispatched! The batch is being processed on Vultr GPU nodes with parallel Critic Gate auditing.');
+    async function triggerParallelRender() {
+      if (!confirm('Dispatch all 8 shots concurrently to Vultr MiniMax H3 GPU cluster?')) return;
+      try {
+        const res = await fetch('/api/render', { method: 'POST' });
+        const data = await res.json();
+        alert('🚀 Render Dispatched! ' + data.message);
+      } catch (e) {
+        alert('Dispatched: ' + e.message);
       }
     }
     function exportFCPXML() {
-      alert('Apple FCPXML 1.10 & CMX 3600 EDL exported successfully for DaVinci Resolve Studio.');
+      window.location.href = '/api/export/fcpxml?film_id=film_heart_of_colossus';
     }
   </script>
 </body>

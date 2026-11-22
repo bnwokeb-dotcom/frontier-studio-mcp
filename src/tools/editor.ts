@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { studioPaths } from '../store/paths.js';
+import { studioPaths, type StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
 import { shotShow, type ShotRecord } from '../store/shot.js';
 import { readJson } from '../store/fs.js';
@@ -13,6 +13,68 @@ import { errNotFound, errValidation } from '../errors.js';
 import { guard, out } from './registry.js';
 
 const execFileAsync = promisify(execFileCb);
+
+export async function generateFcpxmlString(paths: StudioPaths, filmId: string, timelineTitle?: string): Promise<string> {
+  const shotsDir = paths.shotsDir(filmId);
+  let files: string[] = [];
+  try {
+    files = (await readdir(shotsDir)).filter((f) => f.endsWith('.json'));
+  } catch {
+    throw errNotFound(`no shots found for film "${filmId}"`, 'create shots first');
+  }
+
+  const shots: ShotRecord[] = [];
+  for (const f of files.sort()) {
+    shots.push(await shotShow(paths, filmId, f.replace(/\.json$/, '')));
+  }
+
+  const timelineName = timelineTitle ?? filmId;
+  let currentFrame = 0;
+  const fps = 24;
+  const assetElements: string[] = [];
+  const spineElements: string[] = [];
+
+  shots.forEach((shot, index) => {
+    const durationFrames = Math.round(shot.durationS * fps);
+    const assetId = `r_shot_${index + 1}`;
+    const keptTake = shot.takes?.find((t) => t.verdict === 'kept');
+    const videoFile = keptTake ? `renders/${keptTake.jobId}/shot.mp4` : `renders/placeholder_${shot.id}.mp4`;
+
+    assetElements.push(
+      `    <asset id="${assetId}" name="${shot.id}" src="file://${videoFile}" duration="${durationFrames}/24s" format="r1" hasVideo="1" hasAudio="1" />`,
+    );
+
+    spineElements.push(
+      `        <video name="${shot.id}" offset="${currentFrame}/24s" ref="${assetId}" duration="${durationFrames}/24s" start="0s">`,
+      `          <!-- ${shot.camera.lens} ${shot.camera.move} — ${shot.camera.reason} -->`,
+      `        </video>`,
+    );
+
+    currentFrame += durationFrames;
+  });
+
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<!DOCTYPE fcpxml>',
+    '<fcpxml version="1.10">',
+    '  <resources>',
+    '    <format id="r1" name="FFVideoFormat1080p24" frameDuration="1/24s" width="1920" height="1080"/>',
+    ...assetElements,
+    '  </resources>',
+    '  <library>',
+    `    <event name="${filmId}">`,
+    `      <project name="${timelineName}">`,
+    `        <sequence format="r1" duration="${currentFrame}/24s" tcStart="0s">`,
+    '          <spine>',
+    ...spineElements,
+    '          </spine>',
+    '        </sequence>',
+    '      </project>',
+    '    </event>',
+    '  </library>',
+    '</fcpxml>',
+  ].join('\n');
+}
 
 export function registerEditorTools(server: McpServer, studioRoot: string): void {
   const paths = studioPaths(studioRoot);
