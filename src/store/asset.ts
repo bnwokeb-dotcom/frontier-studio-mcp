@@ -11,9 +11,19 @@ const KIND_DIR: Record<AssetKind, AssetKindDir> = {
   character: 'characters', location: 'locations', prop: 'props', style: 'styles',
 };
 
+export interface BiologicalMarkers {
+  irisColorHex?: string;
+  boneStructure?: string;
+  signatureMarks?: string;
+  ethnicAncestry?: string;
+}
+
 export interface AssetInput {
   kind: AssetKind; assetId: string; descriptor: string;
   voice?: string; acting?: string; geoBlock?: string;
+  voiceSamplePath?: string; voiceId?: string; voiceProvider?: 'google' | 'elevenlabs';
+  biologicalMarkers?: BiologicalMarkers;
+  parentDna?: string;
 }
 
 const kindDirOf = (kind: AssetKind): AssetKindDir => {
@@ -39,6 +49,24 @@ export async function assetRegister(paths: StudioPaths, filmId: string, input: A
   if (input.kind === 'character') {
     await writeText(joinDir(dir, 'voice.md'), input.voice!.trim());
     await writeText(joinDir(dir, 'acting.md'), input.acting!.trim());
+
+    if (input.voiceSamplePath) {
+      await copyFile(input.voiceSamplePath, joinDir(dir, 'voice_sample.wav'));
+    }
+    if (input.voiceId || input.voiceProvider || input.voiceSamplePath) {
+      const profile = {
+        voiceId: input.voiceId ?? null,
+        provider: input.voiceProvider ?? (input.voiceId ? 'elevenlabs' : 'google'),
+        hasSample: Boolean(input.voiceSamplePath),
+      };
+      await writeText(joinDir(dir, 'voice_profile.json'), JSON.stringify(profile, null, 2));
+    }
+    if (input.biologicalMarkers) {
+      await writeText(joinDir(dir, 'biological_markers.json'), JSON.stringify(input.biologicalMarkers, null, 2));
+    }
+    if (input.parentDna) {
+      await writeText(joinDir(dir, 'parent_dna.txt'), input.parentDna.trim());
+    }
   }
   if (input.kind === 'location' && input.geoBlock?.trim()) {
     await writeText(joinDir(dir, 'geo_block.md'), input.geoBlock.trim());
