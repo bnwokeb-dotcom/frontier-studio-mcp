@@ -18,6 +18,9 @@ FROM node:20-alpine AS runner
 
 WORKDIR /app
 
+# Install system dependencies (FFmpeg for cutting room & acoustic matching, wget for healthcheck)
+RUN apk add --no-cache ffmpeg wget
+
 ENV NODE_ENV=production
 ENV MCP_TRANSPORT=sse
 ENV PORT=3000

@@ -16,6 +16,7 @@ services:
       - STUDIO_LIVE=${STUDIO_LIVE:-0}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - VULTR_INFERENCE_API_KEY=${VULTR_INFERENCE_API_KEY}
+      - ELEVENLABS_API_KEY=${ELEVENLABS_API_KEY}
     volumes:
       - studio_data:/data/studio
 
