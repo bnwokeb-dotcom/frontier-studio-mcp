@@ -1,7 +1,7 @@
 // src/http.ts — HTTP & SSE transport server for remote MCP clients and static artifact streaming.
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { stat, readFile } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve } from 'node:path';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -65,6 +65,27 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
 
     const parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
     const pathname = parsedUrl.pathname;
+
+    // Web Director Console UI & Landing Page
+    if (req.method === 'GET' && (pathname === '/' || pathname === '/studio')) {
+      const consolePath = resolve(process.cwd(), 'web', 'studio.html');
+      try {
+        const content = await readFile(consolePath, 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(content);
+        return;
+      } catch {}
+    }
+
+    if (req.method === 'GET' && pathname === '/landing') {
+      const landingPath = resolve(process.cwd(), 'web', 'index.html');
+      try {
+        const content = await readFile(landingPath, 'utf8');
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(content);
+        return;
+      } catch {}
+    }
 
     // 1. Health check probe
     if (req.method === 'GET' && pathname === '/health') {
