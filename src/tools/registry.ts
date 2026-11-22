@@ -302,11 +302,19 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     voice: z.string().optional(),
     acting: z.string().optional(),
     geo_block: z.string().optional(),
+    voice_sample_path: z.string().optional(),
+    voice_id: z.string().optional(),
+    voice_provider: z.enum(['google', 'elevenlabs']).optional(),
+    parent_dna: z.string().optional(),
   }, async (a) => guard(async () => {
     const filmId = await filmIdOf(a.film_id);
     const { assetDir } = await assetRegister(paths, filmId, {
       kind: a.kind, assetId: a.asset_id, descriptor: a.descriptor,
       voice: a.voice, acting: a.acting, geoBlock: a.geo_block,
+      voiceSamplePath: a.voice_sample_path,
+      voiceId: a.voice_id,
+      voiceProvider: a.voice_provider,
+      parentDna: a.parent_dna,
     });
     return out(assetDir);
   }));

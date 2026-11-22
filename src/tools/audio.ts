@@ -1,6 +1,6 @@
 // src/tools/audio.ts — M4 Audio Tools: dialogue rendering, diegetic acoustic matching, and soundscapes.
 import { z } from 'zod';
-import { mkdir, writeFile, copyFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile, copyFile, stat, readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -78,12 +78,46 @@ export function registerAudioTools(server: McpServer, studioRoot: string): void 
 
         for (let i = 0; i < dialogueList.length; i++) {
           const item = dialogueList[i];
-          const estimatedCost = audioLane.price({ dialogue: item.line });
+          let lineVoiceName = a.voice_name;
+          let lineVoiceId: string | undefined;
+          let lineLaneKind = a.lane;
+
+          if (item.voiceRef) {
+            try {
+              const profPath = `${paths.assetDir(filmId, 'characters', item.voiceRef)}/voice_profile.json`;
+              const profRaw = await readFile(profPath, 'utf8');
+              const prof = JSON.parse(profRaw);
+              if (prof.voiceId) {
+                lineVoiceId = prof.voiceId;
+                if (!lineVoiceName) lineVoiceName = prof.voiceId;
+              }
+              if (!lineLaneKind && prof.provider) {
+                lineLaneKind = prof.provider;
+              }
+            } catch {
+              // Plain or legacy character without voice_profile.json
+            }
+          }
+
+          const currentLaneKind = lineLaneKind ?? 'google';
+          let lineAudioLane = audioLane;
+          if (currentLaneKind === 'elevenlabs' && audioLane.kind !== 'elevenlabs') {
+            const key = process.env.ELEVENLABS_API_KEY;
+            if (!key) throw errValidation('missing ELEVENLABS_API_KEY', 'set ELEVENLABS_API_KEY in .env');
+            lineAudioLane = new ElevenLabsAudioLane(key);
+          } else if (currentLaneKind === 'google' && audioLane.kind !== 'google') {
+            const key = cfg.geminiApiKey;
+            if (!key) throw errValidation('missing GEMINI_API_KEY for audio lane', 'set GEMINI_API_KEY in .env');
+            lineAudioLane = new GoogleAudioLane(key);
+          }
+
+          const estimatedCost = lineAudioLane.price({ dialogue: item.line, voiceId: lineVoiceId });
           await ensureBudget(paths, filmId, estimatedCost);
 
-          const artifact = await audioLane.synthesize({
+          const artifact = await lineAudioLane.synthesize({
             dialogue: item.line,
-            voiceName: a.voice_name,
+            voiceName: lineVoiceName,
+            voiceId: lineVoiceId,
           });
 
           const filename = `${a.shot_id}_line_${i + 1}.wav`;
@@ -96,7 +130,7 @@ export function registerAudioTools(server: McpServer, studioRoot: string): void 
           const ledgerLine = JSON.stringify({
             ts: new Date().toISOString(),
             tool: 'dialogue_render',
-            lane: audioLane.kind,
+            lane: lineAudioLane.kind,
             film_id: filmId,
             shot_id: a.shot_id,
             cost_usd: artifact.costUsd,

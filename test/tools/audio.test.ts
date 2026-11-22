@@ -168,4 +168,53 @@ describe('Audio Tools', () => {
     const diegeticBytes = await readFile(data.diegetic_audio_path);
     expect(diegeticBytes.toString('utf8')).toContain('RIFF');
   });
+
+  it('dialogue_render automatically binds to character voice_profile.json', async () => {
+    // Register character with locked voice_profile
+    await client.callTool({
+      name: 'asset_register',
+      arguments: {
+        kind: 'character',
+        asset_id: 'char_corvus',
+        descriptor: 'Corvus Vance, blacksmith in apron',
+        voice: 'Deep weathered baritone',
+        acting: 'Quiet and motionless',
+        voice_id: 'en-US-Journey-D',
+        voice_provider: 'google',
+      },
+    });
+
+    await client.callTool({
+      name: 'shot_create',
+      arguments: {
+        id: 'shot_corvus',
+        sequence: 'seq01',
+        action: 'Corvus speaks.',
+        geo_block: 'dense pine trees, deep snow',
+        refs: [{ asset_id: 'char_corvus', role: 'character' }, { asset_id: 'loc_forest', role: 'location' }],
+        camera: { lens: '50mm', move: 'static', reason: 'close up on Corvus' },
+        audio_block: {
+          dialogue: [{ voice_ref: 'char_corvus', line: 'The heat remains.' }],
+        },
+        duration_s: 4,
+      },
+    });
+
+    let requestedVoiceName: string | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      if (init && init.body) {
+        const payload = JSON.parse(init.body as string);
+        requestedVoiceName = payload.voice?.name;
+      }
+      const fakeBase64 = Buffer.from('RIFF48kHzAudioData').toString('base64');
+      return new Response(JSON.stringify({ audioContent: fakeBase64 }), { status: 200 });
+    });
+
+    await client.callTool({
+      name: 'dialogue_render',
+      arguments: { shot_id: 'shot_corvus' },
+    });
+
+    expect(requestedVoiceName).toBe('en-US-Journey-D');
+  });
 });

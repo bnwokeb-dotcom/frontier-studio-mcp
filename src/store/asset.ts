@@ -54,9 +54,10 @@ export async function assetRegister(paths: StudioPaths, filmId: string, input: A
       await copyFile(input.voiceSamplePath, joinDir(dir, 'voice_sample.wav'));
     }
     if (input.voiceId || input.voiceProvider || input.voiceSamplePath) {
+      const isGoogleName = Boolean(input.voiceId && (input.voiceId.includes('-') || ['Charon', 'Fenrir', 'Puck', 'Aoede', 'Kore'].includes(input.voiceId)));
       const profile = {
         voiceId: input.voiceId ?? null,
-        provider: input.voiceProvider ?? (input.voiceId ? 'elevenlabs' : 'google'),
+        provider: input.voiceProvider ?? (isGoogleName ? 'google' : input.voiceId ? 'elevenlabs' : 'google'),
         hasSample: Boolean(input.voiceSamplePath),
       };
       await writeText(joinDir(dir, 'voice_profile.json'), JSON.stringify(profile, null, 2));
