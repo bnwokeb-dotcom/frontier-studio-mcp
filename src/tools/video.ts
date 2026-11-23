@@ -192,7 +192,7 @@ async function ledgerFactsForJob(
 // override (repair extend — the agent's parent final-frame) or the keyframe
 // plate (staging before spend). The tool name and optional parent lineage ride
 // into the ledger line and the jobs.json entry via runBilledVideoSubmit.
-async function submitShotRender(opts: {
+export async function submitShotRender(opts: {
   studioRoot: string;
   paths: StudioPaths;
   filmId: string;

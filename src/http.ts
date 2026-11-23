@@ -3,14 +3,19 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { stat, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
 import { extname, isAbsolute, relative, resolve, join } from 'node:path';
-import { spawn } from 'node:child_process';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { buildServer } from './server.js';
 import { studioPaths } from './store/paths.js';
-import { filmShow } from './store/film.js';
-import { readJson } from './store/fs.js';
+import { filmShow, filmCreate, filmMetaOrThrow, type FilmMeta } from './store/film.js';
+import { shotShow, shotCreate, shotUpdate, type ShotRecord } from './store/shot.js';
+import { readJson, writeJsonAtomic } from './store/fs.js';
+import { readJobs, updateJob } from './store/jobs.js';
 import { generateFcpxmlString } from './tools/editor.js';
+import { submitShotRender } from './tools/video.js';
+import { VultrLane } from './lanes/vultr.js';
+import { loadConfig } from './config.js';
+import type { VideoQuality } from './lanes/video.js';
 
 const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -41,15 +46,30 @@ export interface StudioHttpServer {
   close: () => Promise<void>;
 }
 
+async function readBodyJson<T = any>(req: IncomingMessage): Promise<T> {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk.toString(); });
+    req.on('end', () => {
+      try {
+        resolve(raw ? JSON.parse(raw) : {} as T);
+      } catch (e) {
+        reject(e);
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
   const root = resolve(opts.studioRoot);
   const version = opts.version || '0.1.0';
   const sessions = new Map<string, { transport: SSEServerTransport; mcpServer: McpServer }>();
 
   const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    // CORS headers for browser clients (Claude web, ChatGPT, inspector)
+    // CORS headers for browser clients
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', '*');
 
     if (req.method === 'OPTIONS') {
@@ -61,7 +81,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     const hostHeader = req.headers.host || 'localhost';
     const rawUrl = req.url ?? '/';
 
-    // Global traversal guard: raw URL containing .. or encoded traversal
+    // Global traversal guard
     if (rawUrl.includes('..') || rawUrl.includes('%2e%2e') || rawUrl.includes('%2E%2E')) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Forbidden' }));
@@ -92,7 +112,53 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       } catch {}
     }
 
-    // 1a. Dynamic Studio Film Data API
+    // ── 1. Dynamic Projects List API ──────────────────────────────────────────
+    if (req.method === 'GET' && pathname === '/api/films') {
+      try {
+        const paths = studioPaths(root);
+        let filmDirs: string[] = [];
+        try {
+          filmDirs = await readdir(paths.filmsDir);
+        } catch {}
+        const films: FilmMeta[] = [];
+        for (const dir of filmDirs) {
+          try {
+            films.push(await filmShow(paths, dir));
+          } catch {}
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ films }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 2. Create Film Project API ───────────────────────────────────────────
+    if (req.method === 'POST' && pathname === '/api/films') {
+      try {
+        const body = await readBodyJson(req);
+        const paths = studioPaths(root);
+        const filmId = body.film_id || `film_${Date.now()}`;
+        const meta = await filmCreate(paths, filmId, {
+          title: body.title,
+          logline: body.logline,
+          budgetUsd: body.budget_usd ? Number(body.budget_usd) : undefined,
+          targetRuntimeMin: body.target_runtime_min ? Number(body.target_runtime_min) : undefined,
+        });
+        res.writeHead(201, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ film: meta }));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 3. Dynamic Studio Film Data API ───────────────────────────────────────
     if (req.method === 'GET' && pathname === '/api/film') {
       try {
         const filmId = parsedUrl.searchParams.get('film_id') || 'film_heart_of_colossus';
@@ -109,8 +175,58 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
             shots.push(await readJson(`${shotsDir}/${sf}`));
           } catch {}
         }
+
+        // Discover characters and locations
+        const charDir = paths.assetDir(filmId, 'characters', '');
+        let characters: any[] = [];
+        try {
+          const cNames = await readdir(charDir.replace(/\/$/, ''));
+          for (const cn of cNames) {
+            characters.push({
+              id: cn,
+              sheetUrl: `/artifacts/films/${filmId}/assets/characters/${cn}/sheet.png`,
+            });
+          }
+        } catch {}
+
+        const locDir = paths.assetDir(filmId, 'locations', '');
+        let locations: any[] = [];
+        try {
+          const lNames = await readdir(locDir.replace(/\/$/, ''));
+          for (const ln of lNames) {
+            locations.push({
+              id: ln,
+              plateUrl: `/artifacts/films/${filmId}/assets/locations/${ln}/plate.png`,
+            });
+          }
+        } catch {}
+
+        // Read jobs.json & ledger
+        let jobs: any[] = [];
+        try {
+          jobs = await readJobs(paths, filmId);
+        } catch {}
+
+        let totalSpentUsd = 0;
+        try {
+          const ledgerRaw = await readFile(paths.ledgerPath(filmId), 'utf8');
+          for (const line of ledgerRaw.split('\n')) {
+            if (!line.trim()) continue;
+            try {
+              const entry = JSON.parse(line);
+              if (entry.cost_usd && !entry.estimated) totalSpentUsd += entry.cost_usd;
+            } catch {}
+          }
+        } catch {}
+
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ film: meta, shots }));
+        res.end(JSON.stringify({
+          film: meta,
+          shots,
+          assets: { characters, locations },
+          jobs,
+          totalSpentUsd: Math.round(totalSpentUsd * 100) / 100,
+        }));
         return;
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -119,7 +235,138 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       }
     }
 
-    // 1b. Dynamic FCPXML Timeline Export API
+    // ── 4. Create / Update Shot API ──────────────────────────────────────────
+    if (req.method === 'POST' && pathname === '/api/shots') {
+      try {
+        const body = await readBodyJson(req);
+        const paths = studioPaths(root);
+        const filmId = body.film_id;
+        const shotData = body.shot;
+        if (!filmId || !shotData || !shotData.id) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'film_id and shot.id are required' }));
+          return;
+        }
+
+        const shotPath = paths.shotPath(filmId, shotData.id);
+        await writeJsonAtomic(shotPath, shotData);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ shot: shotData }));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 5. Real GPU Video Render Submission API ───────────────────────────────
+    if (req.method === 'POST' && pathname === '/api/shots/render') {
+      try {
+        const body = await readBodyJson(req);
+        const filmId = body.film_id || 'film_heart_of_colossus';
+        const shotId = body.shot_id;
+        const quality = (body.quality || 'standard') as VideoQuality;
+        const aspectRatio = body.aspect_ratio || '16:9';
+
+        if (!shotId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'shot_id is required' }));
+          return;
+        }
+
+        const paths = studioPaths(root);
+        const shot = await shotShow(paths, filmId, shotId);
+        const sub = await submitShotRender({
+          studioRoot: root,
+          paths,
+          filmId,
+          shot,
+          quality,
+          aspectRatio,
+          tool: 'render_shot',
+        });
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: 'submitted',
+          jobId: sub.jobId,
+          estimateUsd: sub.estimateUsd,
+          durationS: sub.durationS,
+        }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 6. Live Job Status & Auto-Download Poller API ─────────────────────────
+    if (req.method === 'POST' && pathname === '/api/jobs/poll') {
+      try {
+        const body = await readBodyJson(req);
+        const filmId = body.film_id || 'film_heart_of_colossus';
+        const jobId = body.job_id;
+        if (!jobId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'job_id is required' }));
+          return;
+        }
+
+        const cfg = loadConfig();
+        const apiKey = cfg.vultrApiKey || process.env.VULTR_INFERENCE_API_KEY || '';
+        const lane = new VultrLane(apiKey);
+        const jobStatus = await lane.status({ jobId });
+        const paths = studioPaths(root);
+
+        if (jobStatus.status === 'completed') {
+          // Download video artifact and store on disk
+          const artifact = await lane.result({ jobId });
+          const rendersDir = join(paths.rendersDir(filmId), jobId);
+          await mkdir(rendersDir, { recursive: true });
+          const mp4Path = join(rendersDir, 'shot.mp4');
+          await writeFile(mp4Path, artifact.data);
+
+          await updateJob(paths, filmId, jobId, (j) => ({
+            ...j,
+            status: 'completed',
+            cost_usd: artifact.costUsd,
+          }));
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            status: 'completed',
+            progress: 100,
+            jobId,
+            videoUrl: `/artifacts/films/${filmId}/renders/${jobId}/shot.mp4`,
+            costUsd: artifact.costUsd,
+            duration: artifact.realSeconds || 5.0,
+          }));
+          return;
+        }
+
+        await updateJob(paths, filmId, jobId, (j) => ({
+          ...j,
+          status: jobStatus.status as any,
+          progress: jobStatus.progress,
+        }));
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          status: jobStatus.status,
+          progress: jobStatus.progress,
+          jobId,
+        }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 7. Dynamic FCPXML Timeline Export API ─────────────────────────────────
     if (req.method === 'GET' && pathname === '/api/export/fcpxml') {
       try {
         const filmId = parsedUrl.searchParams.get('film_id') || 'film_heart_of_colossus';
@@ -143,26 +390,14 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       }
     }
 
-    // 1c. Trigger GPU Parallel Render API
-    if (req.method === 'POST' && pathname === '/api/render') {
-      const filmId = parsedUrl.searchParams.get('film_id') || 'film_heart_of_colossus';
-      res.writeHead(202, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({
-        status: 'queued',
-        film_id: filmId,
-        message: 'Parallel Vultr MiniMax H3 render initiated with Critic Gate supervision.'
-      }));
-      return;
-    }
-
-    // 1. Health check probe
+    // ── 8. Health Check Probe ────────────────────────────────────────────────
     if (req.method === 'GET' && pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ status: 'ok', version, studioRoot: root }));
       return;
     }
 
-    // 2. SSE handshake endpoint
+    // ── 9. SSE Handshake Endpoint ─────────────────────────────────────────────
     if (req.method === 'GET' && pathname === '/sse') {
       try {
         const transport = new SSEServerTransport('/messages', res);
@@ -190,7 +425,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       return;
     }
 
-    // 3. Post messages for active SSE sessions
+    // ── 10. Post Messages for Active SSE Sessions ─────────────────────────────
     if (req.method === 'POST' && pathname === '/messages') {
       const sessionId = parsedUrl.searchParams.get('sessionId');
       if (!sessionId || !sessions.has(sessionId)) {
@@ -198,25 +433,18 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
         res.end(JSON.stringify({ error: 'Session not found or expired' }));
         return;
       }
-      const session = sessions.get(sessionId)!;
-      try {
-        await session.transport.handlePostMessage(req, res);
-      } catch (err) {
-        if (!res.headersSent) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: (err as Error).message }));
-        }
-      }
+      const { transport } = sessions.get(sessionId)!;
+      await transport.handlePostMessage(req, res);
       return;
     }
 
-    // 4. Static media artifact streaming (/artifacts/*)
-    if (req.method === 'GET' && pathname.startsWith('/artifacts')) {
-      const subPath = decodeURIComponent(pathname.replace(/^\/artifacts\/?/, ''));
-      const safePath = resolve(root, subPath);
-      const rel = relative(root, safePath);
+    // ── 11. Static Artifact Streaming ────────────────────────────────────────
+    if (req.method === 'GET' && pathname.startsWith('/artifacts/')) {
+      const rawRelPath = pathname.slice('/artifacts/'.length);
+      const safeRelPath = rawRelPath.split('/').filter((seg) => seg && seg !== '.' && seg !== '..').join('/');
+      const filePath = resolve(root, safeRelPath);
 
-      // Traversal protection: cannot escape studio root
+      const rel = relative(root, filePath);
       if (rel.startsWith('..') || isAbsolute(rel)) {
         res.writeHead(403, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Forbidden' }));
@@ -224,79 +452,66 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       }
 
       try {
-        const fileStat = await stat(safePath);
+        const fileStat = await stat(filePath);
         if (!fileStat.isFile()) {
           res.writeHead(404, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Artifact is not a file' }));
+          res.end(JSON.stringify({ error: 'Not a file' }));
           return;
         }
 
-        const ext = extname(safePath).toLowerCase();
+        const ext = extname(filePath).toLowerCase();
         const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-        const totalSize = fileStat.size;
-
-        // Support video range requests for seeking in browsers
-        const range = req.headers.range;
-        if (range && ext === '.mp4') {
-          const parts = range.replace(/bytes=/, '').split('-');
-          const start = parseInt(parts[0], 10);
-          const end = parts[1] ? parseInt(parts[1], 10) : totalSize - 1;
-          const chunkSize = end - start + 1;
-
-          res.writeHead(206, {
-            'Content-Range': `bytes ${start}-${end}/${totalSize}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': chunkSize,
-            'Content-Type': contentType,
-          });
-          createReadStream(safePath, { start, end }).pipe(res);
-          return;
-        }
 
         res.writeHead(200, {
-          'Content-Length': totalSize,
           'Content-Type': contentType,
+          'Content-Length': fileStat.size,
           'Accept-Ranges': 'bytes',
         });
-        createReadStream(safePath).pipe(res);
-      } catch (err) {
+
+        const stream = createReadStream(filePath);
+        stream.pipe(res);
+        return;
+      } catch (err: any) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Artifact not found' }));
+        res.end(JSON.stringify({ error: 'File not found' }));
+        return;
       }
-      return;
     }
 
-    // Unmatched route
+    // Default 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
   });
 
-  const port = opts.port ?? 3000;
-  const host = opts.host ?? '0.0.0.0';
-
   return {
     server,
-    port,
-    host,
-    close: () =>
-      new Promise<void>((resolveClose) => {
-        const toClose = Array.from(sessions.values());
-        sessions.clear();
-        for (const session of toClose) {
-          session.transport.onclose = undefined; // prevent recursive close callback
-          session.mcpServer.close().catch(() => {});
-        }
-        server.close(() => resolveClose());
-      }),
+    port: opts.port ?? 3000,
+    host: opts.host ?? '0.0.0.0',
+    close: async () => {
+      for (const { transport, mcpServer } of sessions.values()) {
+        try {
+          await mcpServer.close();
+          await transport.close();
+        } catch {}
+      }
+      sessions.clear();
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    },
   };
 }
 
 export async function startHttpServer(opts: HttpServerOptions): Promise<StudioHttpServer> {
-  const studio = createHttpServer(opts);
-  await new Promise<void>((resolveListen) => {
-    studio.server.listen(studio.port, studio.host, () => {
-      resolveListen();
+  const instance = createHttpServer(opts);
+  return new Promise((resolve, reject) => {
+    instance.server.listen(instance.port, instance.host, () => {
+      const addr = instance.server.address();
+      if (typeof addr === 'object' && addr !== null) {
+        instance.port = addr.port;
+      }
+      resolve(instance);
     });
+    instance.server.on('error', reject);
   });
-  return studio;
 }
