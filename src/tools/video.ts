@@ -112,12 +112,27 @@ async function resolveShotAuditRefs(
   filmId: string,
   refs: ShotRef[],
 ): Promise<{ referenceSheetPath?: string; referencePlatePath?: string }> {
-  const sheetCandidates = refs
-    .filter((r) => r.role === 'character')
-    .map((r) => `${paths.assetDir(filmId, 'characters', r.assetId)}/sheet.png`);
-  const plateCandidates = refs
-    .filter((r) => r.role === 'location' || r.role === 'style')
-    .map((r) => `${paths.assetDir(filmId, r.role === 'location' ? 'locations' : 'styles', r.assetId)}/plate.png`);
+  const sheetCandidates: string[] = [];
+  const plateCandidates: string[] = [];
+
+  const kinds = await Promise.all(refs.map((r) => findAssetKindDir(paths, filmId, r.assetId)));
+  for (let i = 0; i < refs.length; i += 1) {
+    const ref = refs[i];
+    const kindDir =
+      kinds[i] ??
+      (ref.role === 'character'
+        ? 'characters'
+        : ref.role === 'location'
+          ? 'locations'
+          : ref.role === 'style'
+            ? 'styles'
+            : undefined);
+    if (kindDir === 'characters') {
+      sheetCandidates.push(`${paths.assetDir(filmId, kindDir, ref.assetId)}/sheet.png`);
+    } else if (kindDir === 'locations' || kindDir === 'styles') {
+      plateCandidates.push(`${paths.assetDir(filmId, kindDir, ref.assetId)}/plate.png`);
+    }
+  }
 
   const [referenceSheetPath, referencePlatePath] = await Promise.all([
     firstExistingFile(sheetCandidates),
@@ -612,7 +627,14 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
 
     // 7b. post-download decode verification via ffprobe before ever marking completed
     const probe = await probeMedia(artifactPath);
-    if (!probe.exists || !probe.hasVideo || probe.durationS <= 0.05 || (probe.nbFrames > 0 && probe.nbFrames < 2)) {
+    if (
+      !probe.exists ||
+      !probe.hasVideo ||
+      probe.width <= 0 ||
+      probe.height <= 0 ||
+      probe.durationS <= 0.05 ||
+      (probe.nbFrames > 0 && probe.nbFrames < 2)
+    ) {
       await rename(artifactPath, `${jobDir}/shot.corrupt.mp4`).catch(() => {});
       await updateJob(paths, filmId, entry.job_id, (e) => {
         const next: VideoJobEntry = {
@@ -650,10 +672,11 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     });
 
     const fps = probe.fps;
-    const resolution = `${probe.width}x${probe.height}`;
+    const reportedWidth = probe.width > 0 ? probe.width : art.width;
+    const reportedHeight = probe.height > 0 ? probe.height : art.height;
+    const resolution =
+      reportedWidth && reportedHeight ? `${reportedWidth}x${reportedHeight}` : undefined;
     const durationS = Number(probe.durationS.toFixed(2));
-    const width = art.width ?? probe.width;
-    const height = art.height ?? probe.height;
     const hasAudio = art.hasAudio ?? probe.hasAudio;
 
     // 8. jobs.json: the completed entry carries the artifact + the actual facts;
@@ -666,11 +689,11 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
         artifact_path: artifactPath,
         actual_cost_usd: art.costUsd,
         ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
-        width,
-        height,
+        ...(reportedWidth !== undefined ? { width: reportedWidth } : {}),
+        ...(reportedHeight !== undefined ? { height: reportedHeight } : {}),
         has_audio: hasAudio,
         fps,
-        resolution,
+        ...(resolution !== undefined ? { resolution } : {}),
         duration_s: durationS,
         qc_verdict: qc.verdict,
         qc_score: qc.score,
@@ -690,11 +713,11 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       artifact_path: updated.artifact_path,
       actual_cost_usd: updated.actual_cost_usd,
       ...(art.realSeconds !== undefined ? { real_length_s: art.realSeconds } : {}),
-      width,
-      height,
+      ...(reportedWidth !== undefined ? { width: reportedWidth } : {}),
+      ...(reportedHeight !== undefined ? { height: reportedHeight } : {}),
       has_audio: hasAudio,
       fps,
-      resolution,
+      ...(resolution !== undefined ? { resolution } : {}),
       duration_s: durationS,
       qc_verdict: qc.verdict,
       qc_score: qc.score,

@@ -723,8 +723,8 @@ describe('job_download', () => {
     expect(o.status).toBe('completed');
     expect(o.actual_cost_usd).toBeCloseTo(0.642, 12);
     expect(o.real_length_s).toBe(6.58);
-    expect(o.width).toBe(1366);
-    expect(o.height).toBe(768);
+    expect(o.width).toBe(320);
+    expect(o.height).toBe(180);
     expect(o.has_audio).toBe(true);
     expect(o.fps).toBe(24);
     expect(o.resolution).toBe('320x180');
@@ -753,7 +753,7 @@ describe('job_download', () => {
       job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
       submitted_ts: expect.any(String), prompt_version: 'h3-v1',
       artifact_path: `${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`,
-      actual_cost_usd: 0.642, real_seconds: 6.58, width: 1366, height: 768, has_audio: true,
+      actual_cost_usd: 0.642, real_seconds: 6.58, width: 320, height: 180, has_audio: true,
       fps: 24, resolution: '320x180', duration_s: 1,
       qc_verdict: 'kept', qc_score: expect.any(Number), qc_issues: [],
     }]);
@@ -906,7 +906,7 @@ describe('job_download', () => {
       job_id: 'vid-fixture-0001', shot_id: 's1', lane: 'vultr', status: 'completed',
       submitted_ts: expect.any(String), prompt_version: 'h3-v1',
       artifact_path: `${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`,
-      actual_cost_usd: 1.02, real_seconds: 8, width: 1366, height: 768, has_audio: true,
+      actual_cost_usd: 1.02, real_seconds: 8, width: 320, height: 180, has_audio: true,
       fps: 24, resolution: '320x180', duration_s: 1,
       qc_verdict: 'kept', qc_score: expect.any(Number), qc_issues: [],
     });
@@ -986,6 +986,8 @@ describe('job_download', () => {
     expect(Array.isArray(o.qc_issues)).toBe(true);
     expect((o.qc_issues as string[]).some((r) => r.includes('black') || r.includes('uniform'))).toBe(true);
     expect(o.fps).toBe(24);
+    expect(o.width).toBe(320);
+    expect(o.height).toBe(180);
     expect(o.resolution).toBe('320x180');
     expect(o.duration_s).toBe(1);
 
@@ -995,6 +997,8 @@ describe('job_download', () => {
       artifact_path: `${root}/films/film_x/renders/vid-fixture-0001/shot.mp4`,
       qc_verdict: 'rejected',
       fps: 24,
+      width: 320,
+      height: 180,
       resolution: '320x180',
       duration_s: 1,
     });
