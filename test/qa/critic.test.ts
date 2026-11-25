@@ -234,4 +234,55 @@ describe('VLM Critic Gate (Universal Quality Gauntlet)', () => {
     expect(res.score).toBe(7.5);
     expect(res.reasons).toContain('wardrobe_drift_vs_sheet');
   });
+
+  it('fails closed (rejected) when criticApiKey is set and VLM API request fails', async () => {
+    const movingPath = join(root, 'vlm_fail_closed.mp4');
+    await execFile('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=640x360:rate=24:duration=1.2',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', movingPath,
+    ]);
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      return new Response('Internal Server Error', { status: 500 });
+    });
+
+    const res = await auditTake({
+      mp4Path: movingPath,
+      shotId: 'shot_vlm_fail',
+      expectedAction: 'Hero turns toward camera',
+      durationS: 1.2,
+      criticApiKey: 'test-vlm-key',
+    });
+
+    expect(res.verdict).toBe('rejected');
+    expect(res.score).toBeLessThanOrEqual(6.0);
+    expect(res.reasons).toContain('vlm_audit_failed');
+    expect(res.remediation).toContain('VLM audit failed');
+  });
+
+  it('does not falsely reject high-contrast low-key chiaroscuro night footage (meanYAvg < 20, high yRangeAvg)', async () => {
+    const chiaroscuroPath = join(root, 'chiaroscuro.mp4');
+    // Dark night canvas with a moving 70x70 silver spotlight (>2% pixels so blackdetect does not fire, meanYAvg < 20, wide contrast)
+    await execFile('ffmpeg', [
+      '-y',
+      '-f', 'lavfi', '-i', 'color=c=black:size=640x360:rate=24:duration=1.2',
+      '-f', 'lavfi', '-i', 'color=c=#989898:size=70x70:rate=24:duration=1.2',
+      '-filter_complex', "[0:v][1:v]overlay=x='mod(t*220,540)':y=140[v]",
+      '-map', '[v]',
+      '-c:v', 'libx264',
+      '-pix_fmt', 'yuv420p',
+      chiaroscuroPath,
+    ]);
+
+    const res = await auditTake({
+      mp4Path: chiaroscuroPath,
+      shotId: 'shot_chiaroscuro',
+      expectedAction: 'Moonlit beacon sweeps across dark alley',
+      durationS: 1.2,
+    });
+
+    expect(res.reasons).not.toContain('black_frames_detected');
+    expect(res.verdict).toBe('kept');
+    expect(res.score).toBeGreaterThanOrEqual(8.5);
+  });
 });

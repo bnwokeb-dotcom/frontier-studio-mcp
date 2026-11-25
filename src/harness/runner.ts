@@ -217,27 +217,50 @@ export async function runAutonomousProduction(
 
     // 7. Audit every rendered take via real FFprobe + signalstats/VLM QC gate
     const cfg = loadConfig({ ...process.env, STUDIO_ROOT: root });
-    const plateCandidate = join(paths.assetDir(goal.film_id, 'locations', locId), 'plate.png');
-    const referencePlatePath = (await fileExists(plateCandidate)) ? plateCandidate : undefined;
-    const primaryCharId = goal.characters?.[0]?.asset_id;
-    const sheetCandidate = primaryCharId
-      ? join(paths.assetDir(goal.film_id, 'characters', primaryCharId), 'sheet.png')
+    const defaultPlateCandidate = join(paths.assetDir(goal.film_id, 'locations', locId), 'plate.png');
+    const defaultCharId = goal.characters?.[0]?.asset_id;
+    const defaultSheetCandidate = defaultCharId
+      ? join(paths.assetDir(goal.film_id, 'characters', defaultCharId), 'sheet.png')
       : undefined;
-    const referenceSheetPath = sheetCandidate && (await fileExists(sheetCandidate)) ? sheetCandidate : undefined;
 
     const auditResults = await Promise.all(
-      presentTakes.map(async (take) => ({
-        take,
-        audit: await auditTake({
-          mp4Path: take.videoPath,
-          shotId: take.shot.id,
-          expectedAction: take.expectedAction,
-          durationS: take.shot.durationS,
-          referenceSheetPath,
-          referencePlatePath,
-          criticApiKey: cfg.studioLive ? cfg.geminiApiKey : undefined,
-        }),
-      })),
+      presentTakes.map(async (take) => {
+        const shotLocId = take.shot.refs.find((r) => r.role === 'location')?.assetId;
+        const shotCharId = take.shot.refs.find((r) => r.role === 'character')?.assetId;
+
+        const shotPlatePath = shotLocId
+          ? join(paths.assetDir(goal.film_id, 'locations', shotLocId), 'plate.png')
+          : undefined;
+        const referencePlatePath =
+          shotPlatePath && (await fileExists(shotPlatePath))
+            ? shotPlatePath
+            : (await fileExists(defaultPlateCandidate))
+              ? defaultPlateCandidate
+              : undefined;
+
+        const shotSheetPath = shotCharId
+          ? join(paths.assetDir(goal.film_id, 'characters', shotCharId), 'sheet.png')
+          : undefined;
+        const referenceSheetPath =
+          shotSheetPath && (await fileExists(shotSheetPath))
+            ? shotSheetPath
+            : defaultSheetCandidate && (await fileExists(defaultSheetCandidate))
+              ? defaultSheetCandidate
+              : undefined;
+
+        return {
+          take,
+          audit: await auditTake({
+            mp4Path: take.videoPath,
+            shotId: take.shot.id,
+            expectedAction: take.expectedAction,
+            durationS: take.shot.durationS,
+            referenceSheetPath,
+            referencePlatePath,
+            criticApiKey: cfg.studioLive ? cfg.geminiApiKey : undefined,
+          }),
+        };
+      }),
     );
 
     const qcIssues: string[] = [];

@@ -314,7 +314,7 @@ function buildLocalAuditResult(
 
   const reasons: string[] = [];
   const isFlatFrame = diag.yRangeAvg < 12 || (diag.yInnerRangeAvg < 4 && diag.yRangeAvg < 20);
-  const hasBlackFrames = diag.blackRatio > 0.05 || diag.meanYAvg < 20;
+  const hasBlackFrames = diag.blackRatio > 0.05 || (diag.meanYAvg < 20 && diag.yRangeAvg < 20);
   const isFrozen = diag.freezeRatio >= 0.4 || (diag.frameMotionCount > 0 && diag.meanYdif < 0.02);
   const hasFlickerSpike = diag.maxYAvgJump > 35 || diag.maxYdif > 35;
   const hasGeometryMorph = sizeRatio > 8.0;
@@ -340,12 +340,13 @@ function buildLocalAuditResult(
 
   // 2. Lighting compliance (dynamic contrast + balanced exposure without penalizing B&W/noir)
   let lightingComplianceScore: number;
-  if (diag.blackRatio > 0.25 || diag.meanYAvg < 20) {
+  if (diag.blackRatio > 0.25 || (diag.meanYAvg < 20 && diag.yRangeAvg < 20)) {
     lightingComplianceScore = round1(clamp(2.5 - diag.blackRatio * 2.0, 0, 3.0));
   } else if (isFlatFrame || isOverexposed) {
     lightingComplianceScore = 3.0;
   } else {
-    const contrastNorm = Math.min(1, diag.yInnerRangeAvg / 160);
+    const effectiveContrast = Math.max(diag.yInnerRangeAvg, diag.yRangeAvg * 0.65);
+    const contrastNorm = Math.min(1, effectiveContrast / 160);
     const exposureNorm = 1 - Math.min(1, Math.abs(diag.meanYAvg - 128) / 140);
     lightingComplianceScore = round1(clamp(7.5 + 1.3 * contrastNorm + 0.7 * exposureNorm - diag.blackRatio * 5.0, 0, 9.6));
   }
@@ -458,13 +459,21 @@ export async function auditTake(req: CriticAuditRequest): Promise<CriticAuditRes
     return localResult;
   }
 
-  // Dispatch to Gemini Vision VLM when criticApiKey is configured
+  // Dispatch to Gemini Vision VLM when criticApiKey is configured; fail closed on VLM error
   if (req.criticApiKey) {
     try {
       const vlmResult = await evaluateWithVLM(req.criticApiKey, frames, req);
       return vlmResult;
     } catch (err) {
-      console.warn(`[critic] VLM online evaluation error, falling back to local perceptual audit: ${(err as Error).message}`);
+      const message = (err as Error).message;
+      return {
+        score: Math.min(localResult.score, 6.0),
+        verdict: 'rejected',
+        reasons: [...localResult.reasons, 'vlm_audit_failed'],
+        metrics: localResult.metrics,
+        sampleFramePaths: frames,
+        remediation: `VLM audit failed (${message}); verify GEMINI_API_KEY/network connectivity and re-run auditTake`,
+      };
     }
   }
 

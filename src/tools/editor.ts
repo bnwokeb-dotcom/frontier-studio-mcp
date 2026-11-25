@@ -1,7 +1,8 @@
 // src/tools/editor.ts — The Cutting Room: FFmpeg rough-cut assembly, multi-track FCPXML 1.10 / OTIO export, color grading, and dialogue lip-sync.
 import { z } from 'zod';
-import { readdir, writeFile, mkdir, stat } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { readdir, writeFile, mkdir, stat, rename, rm } from 'node:fs/promises';
+import { join, resolve, dirname, basename } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -72,6 +73,43 @@ async function isNonEmptyFile(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function execFfmpegToDest(
+  argsBeforeDest: string[],
+  destPath: string,
+  inputPaths: string[],
+): Promise<void> {
+  const destResolved = resolve(destPath);
+  const needsTemp = inputPaths.some((p) => resolve(p) === destResolved);
+  if (!needsTemp) {
+    await execFileAsync('ffmpeg', [...argsBeforeDest, destPath]);
+    return;
+  }
+
+  const tmpDest = join(dirname(destPath), `.tmp_${randomBytes(4).toString('hex')}_${basename(destPath)}`);
+  try {
+    await execFileAsync('ffmpeg', [...argsBeforeDest, tmpDest]);
+    await rename(tmpDest, destPath);
+  } catch (err) {
+    await rm(tmpDest, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+function resolveShotRenderDir(
+  paths: StudioPaths,
+  filmId: string,
+  shot: ShotRecord,
+  jobs: VideoJobEntry[],
+  resolvedInput?: string,
+): string {
+  if (resolvedInput) return dirname(resolvedInput);
+  const kept = shot.takes?.find((t) => t.verdict === 'kept') ?? shot.takes?.[shot.takes.length - 1];
+  if (kept) return join(paths.rendersDir(filmId), kept.jobId);
+  const completedJob = [...jobs].reverse().find((j) => j.shot_id === shot.id && j.status === 'completed');
+  if (completedJob) return join(paths.rendersDir(filmId), completedJob.job_id);
+  return paths.rendersDir(filmId);
 }
 
 async function findRenderInJobDir(jobDir: string): Promise<string | undefined> {
@@ -806,11 +844,21 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         const shot = await shotShow(paths, filmId, a.shot_id);
         const jobs = await readJobs(paths, filmId).catch(() => []);
         const resolvedInput = await resolveShotVideoPath(paths, filmId, shot, jobs);
-        const kept = shot.takes?.find((t) => t.verdict === 'kept') ?? shot.takes?.[shot.takes.length - 1];
-        const dir = kept ? join(paths.rendersDir(filmId), kept.jobId) : paths.rendersDir(filmId);
+        const dir = resolveShotRenderDir(paths, filmId, shot, jobs, resolvedInput);
         const era = a.era ?? 'contemporary';
-        const inputPath = resolvedInput ?? join(dir, 'shot.mp4');
         const outputPath = join(dir, `shot_graded_${era}.mp4`);
+
+        // Avoid re-grading an already graded output in-place when clean synced/raw render exists
+        let sourceInput = resolvedInput;
+        if (sourceInput && (resolve(sourceInput) === resolve(outputPath) || basename(sourceInput).startsWith('shot_graded_'))) {
+          for (const candidate of [join(dir, 'shot_synced.mp4'), join(dir, 'shot.mp4')]) {
+            if (await isNonEmptyFile(candidate)) {
+              sourceInput = candidate;
+              break;
+            }
+          }
+        }
+        const inputPath = sourceInput ?? join(dir, 'shot.mp4');
 
         // Build filter pipeline
         const filters: string[] = [];
@@ -863,20 +911,18 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
 
         let executed = false;
         if (a.apply !== false) {
-          if (!resolvedInput) {
+          if (!sourceInput) {
             throw errValidation(
               `no rendered MP4 found for shot "${shot.id}"`,
               'run render_shot and job_download first (or pass apply: false to preview the filter command)',
             );
           }
           await mkdir(dir, { recursive: true });
-          await execFileAsync('ffmpeg', [
-            '-y',
-            '-i', resolvedInput,
-            '-vf', filterComplex,
-            '-c:a', 'copy',
+          await execFfmpegToDest(
+            ['-y', '-i', sourceInput, '-vf', filterComplex, '-c:a', 'copy'],
             outputPath,
-          ]);
+            [sourceInput],
+          );
           executed = true;
         }
 
@@ -937,8 +983,7 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
 
         const jobs = await readJobs(paths, filmId).catch(() => []);
         const resolvedVideo = await resolveShotVideoPath(paths, filmId, shot, jobs);
-        const kept = shot.takes?.find((t) => t.verdict === 'kept') ?? shot.takes?.[shot.takes.length - 1];
-        const dir = kept ? join(paths.rendersDir(filmId), kept.jobId) : paths.rendersDir(filmId);
+        const dir = resolveShotRenderDir(paths, filmId, shot, jobs, resolvedVideo);
         const videoPath = resolvedVideo ?? join(dir, 'shot.mp4');
         const outputPath = join(dir, 'shot_synced.mp4');
 
@@ -954,16 +999,11 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
             );
           }
           await mkdir(dir, { recursive: true });
-          await execFileAsync('ffmpeg', [
-            '-y',
-            '-i', resolvedVideo,
-            '-i', audioPath,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            '-b:a', '192k',
-            '-shortest',
+          await execFfmpegToDest(
+            ['-y', '-i', resolvedVideo, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest'],
             outputPath,
-          ]);
+            [resolvedVideo, audioPath],
+          );
           executed = true;
         }
 

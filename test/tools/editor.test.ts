@@ -320,6 +320,112 @@ describe('Editor Tools (FCPXML, EDL & FFmpeg Assembly)', () => {
     expect(data.duration_s).toBeGreaterThanOrEqual(1.8);
   }, 20_000);
 
+  it('film_grade refuses missing MP4 when apply is true', async () => {
+    const res = await client.callTool({
+      name: 'film_grade',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        era: '1970s_panavision',
+      },
+    });
+    expect((res as { isError?: boolean }).isError).toBe(true);
+    expect((res as { content: Array<{ text: string }> }).content[0].text).toContain('no rendered MP4 found');
+  });
+
+  it('film_grade places output in jobs.json render dir and succeeds when invoked twice with same era', async () => {
+    const paths = studioPaths(root);
+    const jobDir = join(paths.rendersDir('film_edit'), 'job_from_queue');
+    await mkdir(jobDir, { recursive: true });
+    const rawMp4 = join(jobDir, 'shot.mp4');
+    await makeTestMp4(rawMp4, { withAudio: true, durationS: 1 });
+
+    // Record completed job in jobs.json while leaving shot.takes empty
+    await writeJsonAtomic(paths.jobsPath('film_edit'), [
+      {
+        job_id: 'job_from_queue',
+        shot_id: 'seq01-shot01',
+        lane: 'vultr',
+        status: 'completed',
+        submitted_ts: new Date().toISOString(),
+        prompt_version: 'h3-v2',
+        artifact_path: rawMp4,
+      },
+    ]);
+
+    const firstRes = await client.callTool({
+      name: 'film_grade',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        era: '1970s_panavision',
+      },
+    });
+    expect((firstRes as { isError?: boolean }).isError).not.toBe(true);
+    const firstData = JSON.parse((firstRes as { content: Array<{ text: string }> }).content[0].text);
+    expect(firstData.executed).toBe(true);
+    expect(firstData.graded_video).toBe(join(jobDir, 'shot_graded_1970s_panavision.mp4'));
+    expect((await stat(firstData.graded_video)).size).toBeGreaterThan(1000);
+
+    // Second invocation with same era must not fail with in-place FFmpeg overwrite error
+    const secondRes = await client.callTool({
+      name: 'film_grade',
+      arguments: {
+        film_id: 'film_edit',
+        shot_id: 'seq01-shot01',
+        era: '1970s_panavision',
+      },
+    });
+    expect((secondRes as { isError?: boolean }).isError).not.toBe(true);
+    const secondData = JSON.parse((secondRes as { content: Array<{ text: string }> }).content[0].text);
+    expect(secondData.executed).toBe(true);
+    expect(secondData.graded_video).toBe(join(jobDir, 'shot_graded_1970s_panavision.mp4'));
+    expect((await stat(secondData.graded_video)).size).toBeGreaterThan(1000);
+  }, 20_000);
+
+  it('shot_lipsync places shot_synced.mp4 in jobs.json render dir and handles repeat invocation safely', async () => {
+    const paths = studioPaths(root);
+    const jobDir = join(paths.rendersDir('film_edit'), 'job_sync_q');
+    await mkdir(jobDir, { recursive: true });
+    const rawMp4 = join(jobDir, 'shot.mp4');
+    await makeTestMp4(rawMp4, { withAudio: false, durationS: 1 });
+
+    await writeJsonAtomic(paths.jobsPath('film_edit'), [
+      {
+        job_id: 'job_sync_q',
+        shot_id: 'seq01-shot01',
+        lane: 'vultr',
+        status: 'completed',
+        submitted_ts: new Date().toISOString(),
+        prompt_version: 'h3-v2',
+        artifact_path: rawMp4,
+      },
+    ]);
+
+    await mkdir(paths.audioDir('film_edit'), { recursive: true });
+    await makeTestWav(paths.audioPath('film_edit', 'seq01-shot01.wav'), 540, 0.8);
+
+    const firstRes = await client.callTool({
+      name: 'shot_lipsync',
+      arguments: { film_id: 'film_edit', shot_id: 'seq01-shot01' },
+    });
+    expect((firstRes as { isError?: boolean }).isError).not.toBe(true);
+    const firstData = JSON.parse((firstRes as { content: Array<{ text: string }> }).content[0].text);
+    expect(firstData.executed).toBe(true);
+    expect(firstData.synced_video).toBe(join(jobDir, 'shot_synced.mp4'));
+    expect((await stat(firstData.synced_video)).size).toBeGreaterThan(1000);
+
+    // Repeat invocation when shot_synced.mp4 already exists must succeed via atomic temp output
+    const secondRes = await client.callTool({
+      name: 'shot_lipsync',
+      arguments: { film_id: 'film_edit', shot_id: 'seq01-shot01' },
+    });
+    expect((secondRes as { isError?: boolean }).isError).not.toBe(true);
+    const secondData = JSON.parse((secondRes as { content: Array<{ text: string }> }).content[0].text);
+    expect(secondData.executed).toBe(true);
+    expect((await stat(secondData.synced_video)).size).toBeGreaterThan(1000);
+  }, 20_000);
+
   it('film_grade builds FFmpeg 35mm grain, era emulation, and letterbox filter pipeline', async () => {
     const res = await client.callTool({
       name: 'film_grade',

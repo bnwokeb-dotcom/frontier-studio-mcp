@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, mkdir, stat } from 'node:fs/promises';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, rm, mkdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFile as execFileCb } from 'node:child_process';
@@ -55,16 +55,21 @@ function makeSampleGoal(filmId = 'film_auto_01'): AutonomousProductionGoal {
 describe('Hermes-Style Autonomous Studio Harness Runner', () => {
   let root: string;
   let prevStudioLive: string | undefined;
+  let prevGeminiKey: string | undefined;
 
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'fsm-harness-'));
     prevStudioLive = process.env.STUDIO_LIVE;
+    prevGeminiKey = process.env.GEMINI_API_KEY;
     delete process.env.STUDIO_LIVE;
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     if (prevStudioLive !== undefined) process.env.STUDIO_LIVE = prevStudioLive;
     else delete process.env.STUDIO_LIVE;
+    if (prevGeminiKey !== undefined) process.env.GEMINI_API_KEY = prevGeminiKey;
+    else delete process.env.GEMINI_API_KEY;
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 
@@ -169,5 +174,80 @@ describe('Hermes-Style Autonomous Studio Harness Runner', () => {
     expect(report.qc_audit_passed).toBe(false);
     expect(report.rough_cut_path).toBeUndefined();
     expect(report.qc_issues.some((i) => i.includes('shot_01'))).toBe(true);
+  }, 20_000);
+
+  it('resolves per-shot character sheet and location plate from shot.refs before falling back to goal defaults', async () => {
+    const goal = makeSampleGoal('film_auto_refs');
+    goal.characters!.push({
+      asset_id: 'char_two',
+      descriptor: 'Second character in crimson coat',
+      voice: { pitch: 1.05, speed: 1.0, timbre: 'clear' },
+    });
+    await runAutonomousProduction(goal, root);
+
+    const paths = studioPaths(root);
+    await writeFile(join(paths.assetDir('film_auto_refs', 'characters', 'char_grok'), 'sheet.png'), Buffer.from('SHEET_ONE_DATA'));
+    await writeFile(join(paths.assetDir('film_auto_refs', 'characters', 'char_two'), 'sheet.png'), Buffer.from('SHEET_TWO_UNIQUE'));
+    await writeFile(join(paths.assetDir('film_auto_refs', 'locations', 'loc_prehistoric_cave'), 'plate.png'), Buffer.from('PLATE_MAIN_DATA'));
+
+    await mkdir(join(paths.rendersDir('film_auto_refs'), 'job_r1'), { recursive: true });
+    await mkdir(join(paths.rendersDir('film_auto_refs'), 'job_r2'), { recursive: true });
+    await execFile('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=360x640:rate=24:duration=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      join(paths.rendersDir('film_auto_refs'), 'job_r1', 'shot.mp4'),
+    ]);
+    await execFile('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'testsrc2=size=360x640:rate=24:duration=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      join(paths.rendersDir('film_auto_refs'), 'job_r2', 'shot.mp4'),
+    ]);
+
+    const s1 = await readJson<ShotRecord>(paths.shotPath('film_auto_refs', 'shot_01'));
+    s1.refs = [{ assetId: 'char_two', role: 'character' }, { assetId: 'loc_prehistoric_cave', role: 'location' }];
+    s1.takes = [{ jobId: 'job_r1', verdict: 'pending' }];
+    await writeJsonAtomic(paths.shotPath('film_auto_refs', 'shot_01'), s1);
+
+    const s2 = await readJson<ShotRecord>(paths.shotPath('film_auto_refs', 'shot_02'));
+    s2.takes = [{ jobId: 'job_r2', verdict: 'pending' }];
+    await writeJsonAtomic(paths.shotPath('film_auto_refs', 'shot_02'), s2);
+
+    process.env.STUDIO_LIVE = '1';
+    process.env.GEMINI_API_KEY = 'test-key';
+    const vlmBodies: string[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      vlmBodies.push(String(init?.body ?? ''));
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      identity_score: 9.2,
+                      temporal_stability_score: 9.1,
+                      lighting_compliance_score: 9.0,
+                      kinematics_score: 9.0,
+                      overall_score: 9.1,
+                      reasons: [],
+                      verdict: 'kept',
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    });
+
+    const report = await runAutonomousProduction(goal, root);
+    expect(report.status).toBe('COMPLETED');
+    const sheetTwoB64 = Buffer.from('SHEET_TWO_UNIQUE').toString('base64');
+    const shot1Body = vlmBodies.find((b) => b.includes('shot_01'));
+    expect(shot1Body).toBeDefined();
+    expect(shot1Body).toContain(sheetTwoB64);
   }, 20_000);
 });
