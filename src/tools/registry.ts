@@ -10,7 +10,7 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { studioPaths } from '../store/paths.js';
 import { filmCreate, filmShow, type FilmMeta } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
-import { assetRegister } from '../store/asset.js';
+import { assetRegister, type BiologicalMarkers } from '../store/asset.js';
 import { shotCreate, shotUpdate, shotShow, type AudioBlock, type CameraBlock, type CinematicsBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
 import { StudioError, errValidation } from '../errors.js';
@@ -306,8 +306,22 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     voice_id: z.string().optional(),
     voice_provider: z.enum(['google', 'elevenlabs']).optional(),
     parent_dna: z.string().optional(),
+    biological_markers: z.object({
+      iris_color_hex: z.string().optional(),
+      bone_structure: z.string().optional(),
+      signature_marks: z.string().optional(),
+      ethnic_ancestry: z.string().optional(),
+    }).optional(),
   }, async (a) => guard(async () => {
     const filmId = await filmIdOf(a.film_id);
+    const biologicalMarkers: BiologicalMarkers | undefined = a.biological_markers
+      ? {
+          ...(a.biological_markers.iris_color_hex !== undefined ? { irisColorHex: a.biological_markers.iris_color_hex } : {}),
+          ...(a.biological_markers.bone_structure !== undefined ? { boneStructure: a.biological_markers.bone_structure } : {}),
+          ...(a.biological_markers.signature_marks !== undefined ? { signatureMarks: a.biological_markers.signature_marks } : {}),
+          ...(a.biological_markers.ethnic_ancestry !== undefined ? { ethnicAncestry: a.biological_markers.ethnic_ancestry } : {}),
+        }
+      : undefined;
     const { assetDir } = await assetRegister(paths, filmId, {
       kind: a.kind, assetId: a.asset_id, descriptor: a.descriptor,
       voice: a.voice, acting: a.acting, geoBlock: a.geo_block,
@@ -315,6 +329,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       voiceId: a.voice_id,
       voiceProvider: a.voice_provider,
       parentDna: a.parent_dna,
+      ...(biologicalMarkers ? { biologicalMarkers } : {}),
     });
     return out(assetDir);
   }));

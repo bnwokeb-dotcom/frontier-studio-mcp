@@ -295,9 +295,16 @@ export async function submitShotRender(opts: {
     if (resolvedParentId) {
       try {
         const parentShot = await shotShow(paths, filmId, resolvedParentId);
-        const keptTake = parentShot.takes?.find((t) => t.verdict === 'kept') || parentShot.takes?.[parentShot.takes.length - 1];
-        if (keptTake) {
-          const parentDir = `${paths.filmDir(filmId)}/renders/${keptTake.jobId}`;
+        let parentJobId: string | undefined = parentShot.takes?.find((t) => t.verdict === 'kept')?.jobId
+          ?? parentShot.takes?.[parentShot.takes.length - 1]?.jobId;
+        if (!parentJobId) {
+          const jobs = await readJobs(paths, filmId).catch(() => []);
+          const keptJob = [...jobs].reverse().find((j) => j.shot_id === resolvedParentId && j.status === 'completed' && j.qc_verdict === 'kept');
+          const completedJob = [...jobs].reverse().find((j) => j.shot_id === resolvedParentId && j.status === 'completed');
+          parentJobId = (keptJob ?? completedJob)?.job_id;
+        }
+        if (parentJobId) {
+          const parentDir = `${paths.filmDir(filmId)}/renders/${parentJobId}`;
           const tailPath = `${parentDir}/tail_frame.png`;
           const mp4Path = `${parentDir}/shot.mp4`;
           try {
