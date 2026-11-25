@@ -38,7 +38,7 @@
 // submit plain POST /v1/videos child jobs with parent_job_id lineage. Wiring
 // edits requires a verified request shape first (docs or live probe).
 import { z } from 'zod';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -55,8 +55,9 @@ import { findAssetKindDir } from '../store/asset.js';
 import { appendLine, ensureDir, readText } from '../store/fs.js';
 import { readJobs, updateJob } from '../store/jobs.js';
 import type { VideoJobEntry } from '../store/jobs.js';
-import { errNotFound, errValidation } from '../errors.js';
+import { errLaneDown, errNotFound, errValidation } from '../errors.js';
 import { recordSpend } from '../budget.js';
+import { auditTake, probeMedia } from '../qa/critic.js';
 import { composeH3Prompt } from './h3prompt.js';
 import type { H3DialogueLine } from './h3prompt.js';
 import { VultrLane } from '../lanes/vultr.js';
@@ -94,6 +95,52 @@ async function findPlate(
   return undefined;
 }
 
+async function firstExistingFile(candidates: string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      const st = await stat(candidate);
+      if (st.isFile()) return candidate;
+    } catch {
+      // ignore missing reference candidates
+    }
+  }
+  return undefined;
+}
+
+async function resolveShotAuditRefs(
+  paths: StudioPaths,
+  filmId: string,
+  refs: ShotRef[],
+): Promise<{ referenceSheetPath?: string; referencePlatePath?: string }> {
+  const sheetCandidates: string[] = [];
+  const plateCandidates: string[] = [];
+
+  const kinds = await Promise.all(refs.map((r) => findAssetKindDir(paths, filmId, r.assetId)));
+  for (let i = 0; i < refs.length; i += 1) {
+    const ref = refs[i];
+    const kindDir =
+      kinds[i] ??
+      (ref.role === 'character'
+        ? 'characters'
+        : ref.role === 'location'
+          ? 'locations'
+          : ref.role === 'style'
+            ? 'styles'
+            : undefined);
+    if (kindDir === 'characters') {
+      sheetCandidates.push(`${paths.assetDir(filmId, kindDir, ref.assetId)}/sheet.png`);
+    } else if (kindDir === 'locations' || kindDir === 'styles') {
+      plateCandidates.push(`${paths.assetDir(filmId, kindDir, ref.assetId)}/plate.png`);
+    }
+  }
+
+  const [referenceSheetPath, referencePlatePath] = await Promise.all([
+    firstExistingFile(sheetCandidates),
+    firstExistingFile(plateCandidates),
+  ]);
+  return { referenceSheetPath, referencePlatePath };
+}
+
 // Hours until the provider drops the content (expires_at), rounded to 0.1h.
 // null when the payload sent no (parseable) expires_at — the tools then simply
 // have no retention facts and stay silent about them.
@@ -113,7 +160,7 @@ function round4(n: number): number {
 // The async handle: job_id must exist in the film's jobs.json — the file
 // render_shot / repair_shot wrote at submit. Unknown id → NOT_FOUND naming
 // the fix; this is the resolve rung, strictly before any fetch.
-async function jobEntryOrThrow(paths: StudioPaths, filmId: string, jobId: string): Promise<VideoJobEntry> {
+export async function jobEntryOrThrow(paths: StudioPaths, filmId: string, jobId: string): Promise<VideoJobEntry> {
   const jobs = await readJobs(paths, filmId);
   const entry = jobs.find((j) => j.job_id === jobId);
   if (!entry) {
@@ -186,6 +233,63 @@ async function ledgerFactsForJob(
   return { estimate: estimate ?? 0, reconciled, refunded };
 }
 
+/**
+ * Releases the reserved estimate onto the film (negative spend) and records an
+ * idempotent 'refund' line in ledger.jsonl when a video job dies (failed/cancelled/expired).
+ */
+export async function refundDeadJob(
+  paths: StudioPaths,
+  filmId: string,
+  jobId: string,
+  toolName = 'job_status',
+): Promise<string | undefined> {
+  const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, jobId);
+  if (!reconciled && !refunded && estimate > 0.001) {
+    await recordSpend(paths, filmId, -estimate);
+    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: toolName,
+      lane: 'vultr',
+      film_id: filmId,
+      cost_usd: -estimate,
+      verdict: 'pending',
+      job_id: jobId,
+      note: 'refund',
+    }));
+    return 'estimate refunded (only completed jobs bill)';
+  }
+  return undefined;
+}
+
+/**
+ * Settles the provider charge (actualCostUsd - net reservation) onto film.json
+ * and writes an idempotent 'reconcile' delta line to ledger.jsonl before saving media.
+ */
+export async function reconcileJobDownload(
+  paths: StudioPaths,
+  filmId: string,
+  jobId: string,
+  actualCostUsd: number,
+  toolName = 'job_download',
+): Promise<void> {
+  const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, jobId);
+  const net = refunded ? 0 : estimate;
+  const delta = round4(actualCostUsd - net);
+  if (!reconciled && Math.abs(delta) > 0.001) {
+    await recordSpend(paths, filmId, delta);
+    await appendLine(paths.ledgerPath(filmId), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: toolName,
+      lane: 'vultr',
+      film_id: filmId,
+      cost_usd: delta,
+      verdict: 'pending',
+      job_id: jobId,
+      note: 'reconcile',
+    }));
+  }
+}
+
 // The render ladder, rungs action → submit, ONE copy shared by render_shot and
 // repair_shot. Every refusal here precedes any fetch by construction (the
 // callers resolve film/shot/lineage args first). firstFrame: the caller's
@@ -248,9 +352,16 @@ export async function submitShotRender(opts: {
     if (resolvedParentId) {
       try {
         const parentShot = await shotShow(paths, filmId, resolvedParentId);
-        const keptTake = parentShot.takes?.find((t) => t.verdict === 'kept') || parentShot.takes?.[parentShot.takes.length - 1];
-        if (keptTake) {
-          const parentDir = `${paths.filmDir(filmId)}/renders/${keptTake.jobId}`;
+        let parentJobId: string | undefined = parentShot.takes?.find((t) => t.verdict === 'kept')?.jobId
+          ?? parentShot.takes?.[parentShot.takes.length - 1]?.jobId;
+        if (!parentJobId) {
+          const jobs = await readJobs(paths, filmId).catch(() => []);
+          const keptJob = [...jobs].reverse().find((j) => j.shot_id === resolvedParentId && j.status === 'completed' && j.qc_verdict === 'kept');
+          const completedJob = [...jobs].reverse().find((j) => j.shot_id === resolvedParentId && j.status === 'completed');
+          parentJobId = (keptJob ?? completedJob)?.job_id;
+        }
+        if (parentJobId) {
+          const parentDir = `${paths.filmDir(filmId)}/renders/${parentJobId}`;
           const tailPath = `${parentDir}/tail_frame.png`;
           const mp4Path = `${parentDir}/shot.mp4`;
           try {
@@ -370,7 +481,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
   server.tool('render_shot', {
     shot_id: z.string(),
     film_id: z.string().optional(),
-    quality: z.enum(['turbo', 'standard', 'max', 'ultra']).optional(),
+    quality: z.enum(['turbo', 'standard', 'max', 'ultra', '2K', '4K']).optional(),
     aspect_ratio: z.enum(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']).optional(),
     chain_from_shot_id: z.string().optional(),
   }, async (a) => guard(async () => {
@@ -443,21 +554,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     //    — terminal statuses cannot follow a completed download).
     let refundNote: string | undefined;
     if (st.status === 'failed' || st.status === 'cancelled' || st.status === 'expired') {
-      const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, entry.job_id);
-      if (!reconciled && !refunded && estimate > 0.001) {
-        await recordSpend(paths, filmId, -estimate);
-        await appendLine(paths.ledgerPath(filmId), JSON.stringify({
-          ts: new Date().toISOString(),
-          tool: 'job_status',
-          lane: 'vultr',
-          film_id: filmId,
-          cost_usd: -estimate,
-          verdict: 'pending',
-          job_id: entry.job_id,
-          note: 'refund',
-        }));
-        refundNote = 'estimate refunded (only completed jobs bill)';
-      }
+      refundNote = await refundDeadJob(paths, filmId, entry.job_id, 'job_status');
     }
 
     // 5. jobs.json: status in place; error_verbatim on FAILED only — a
@@ -555,33 +652,67 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     //    precedes the artifact write (money truth, billed.ts law): a failed
     //    mp4 write can never lose the charged delta. A prior reconcile line
     //    (the crash window above) skips the accrual — never double it.
-    const { estimate, reconciled, refunded } = await ledgerFactsForJob(paths, filmId, entry.job_id);
-    const net = refunded ? 0 : estimate;
-    const delta = round4(art.costUsd - net);
-    if (!reconciled && Math.abs(delta) > 0.001) {
-      await recordSpend(paths, filmId, delta);
-      await appendLine(paths.ledgerPath(filmId), JSON.stringify({
-        ts: new Date().toISOString(),
-        tool: 'job_download',
-        lane: 'vultr',
-        film_id: filmId,
-        cost_usd: delta,
-        verdict: 'pending',
-        job_id: entry.job_id,
-        note: 'reconcile',
-      }));
-    }
+    await reconcileJobDownload(paths, filmId, entry.job_id, art.costUsd, 'job_download');
 
     // 7. the artifact: <filmDir>/renders/<job_id>/shot.mp4
-    const artifactPath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/shot.mp4`;
-    await ensureDir(`${paths.filmDir(filmId)}/renders/${entry.job_id}`);
+    const jobDir = `${paths.filmDir(filmId)}/renders/${entry.job_id}`;
+    const artifactPath = `${jobDir}/shot.mp4`;
+    await ensureDir(jobDir);
     await writeFile(artifactPath, art.data);
 
+    // 7b. post-download decode verification via ffprobe before ever marking completed
+    const probe = await probeMedia(artifactPath);
+    if (
+      !probe.exists ||
+      !probe.hasVideo ||
+      probe.width <= 0 ||
+      probe.height <= 0 ||
+      probe.durationS <= 0.05 ||
+      (probe.nbFrames > 0 && probe.nbFrames < 2)
+    ) {
+      await rename(artifactPath, `${jobDir}/shot.corrupt.mp4`).catch(() => {});
+      await updateJob(paths, filmId, entry.job_id, (e) => {
+        const next: VideoJobEntry = {
+          ...e,
+          status: 'failed',
+          error_verbatim: 'downloaded video failed ffprobe decode validation',
+          actual_cost_usd: art.costUsd,
+        };
+        delete next.artifact_path;
+        delete next.note;
+        return next;
+      });
+      throw errLaneDown(
+        `downloaded video failed probeMedia decode validation (${probe.error ?? 'invalid video stream'})`,
+        're-render with repair_shot',
+      );
+    }
+
     // Auto-extract tail frame for instant continuous chaining
-    const tailFramePath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/tail_frame.png`;
+    const tailFramePath = `${jobDir}/tail_frame.png`;
     try {
       await execFileAsync('ffmpeg', ['-y', '-sseof', '-0.1', '-i', artifactPath, '-frames:v', '1', '-q:v', '2', tailFramePath]);
     } catch {}
+
+    // 7c. automated perceptual & signal QC via auditTake (local FFmpeg/FFprobe deterministic gate)
+    const shot = await shotShow(paths, filmId, entry.shot_id).catch(() => undefined);
+    const { referenceSheetPath, referencePlatePath } = await resolveShotAuditRefs(paths, filmId, shot?.refs ?? []);
+    const qc = await auditTake({
+      mp4Path: artifactPath,
+      shotId: entry.shot_id,
+      expectedAction: shot?.action ?? '',
+      referenceSheetPath,
+      referencePlatePath,
+      durationS: probe.durationS || shot?.durationS || 5,
+    });
+
+    const fps = probe.fps;
+    const reportedWidth = probe.width > 0 ? probe.width : art.width;
+    const reportedHeight = probe.height > 0 ? probe.height : art.height;
+    const resolution =
+      reportedWidth && reportedHeight ? `${reportedWidth}x${reportedHeight}` : undefined;
+    const durationS = Number(probe.durationS.toFixed(2));
+    const hasAudio = art.hasAudio ?? probe.hasAudio;
 
     // 8. jobs.json: the completed entry carries the artifact + the actual facts;
     //    the refund note and any failure text described interim states — the
@@ -593,9 +724,15 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
         artifact_path: artifactPath,
         actual_cost_usd: art.costUsd,
         ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
-        ...(art.width !== undefined ? { width: art.width } : {}),
-        ...(art.height !== undefined ? { height: art.height } : {}),
-        ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+        ...(reportedWidth !== undefined ? { width: reportedWidth } : {}),
+        ...(reportedHeight !== undefined ? { height: reportedHeight } : {}),
+        has_audio: hasAudio,
+        fps,
+        ...(resolution !== undefined ? { resolution } : {}),
+        duration_s: durationS,
+        qc_verdict: qc.verdict,
+        qc_score: qc.score,
+        qc_issues: qc.reasons,
       };
       delete next.note;
       delete next.error_verbatim;
@@ -611,9 +748,15 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       artifact_path: updated.artifact_path,
       actual_cost_usd: updated.actual_cost_usd,
       ...(art.realSeconds !== undefined ? { real_length_s: art.realSeconds } : {}),
-      ...(art.width !== undefined ? { width: art.width } : {}),
-      ...(art.height !== undefined ? { height: art.height } : {}),
-      ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+      ...(reportedWidth !== undefined ? { width: reportedWidth } : {}),
+      ...(reportedHeight !== undefined ? { height: reportedHeight } : {}),
+      has_audio: hasAudio,
+      fps,
+      ...(resolution !== undefined ? { resolution } : {}),
+      duration_s: durationS,
+      qc_verdict: qc.verdict,
+      qc_score: qc.score,
+      qc_issues: qc.reasons,
       ...(expiresIn !== null && expiresIn < 48
         ? { warning: `content expires in ${expiresIn}h — download or re-render` }
         : {}),

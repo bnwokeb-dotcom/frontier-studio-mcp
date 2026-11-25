@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Frontier Flow & AI Studio Bridge</title>
+  <style>
+    body {
+      width: 360px;
+      margin: 0;
+      padding: 14px;
+      background: #0d1017;
+      color: #f3f4f6;
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 12px;
+    }
+    h1 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #fbbf24;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #ef4444;
+      display: inline-block;
+    }
+    .dot.online { background: #10b981; }
+    .card {
+      background: #161b26;
+      border: 1px solid #2a3244;
+      border-radius: 8px;
+      padding: 10px;
+      margin-bottom: 10px;
+    }
+    label {
+      display: block;
+      font-size: 11px;
+      color: #9ca3af;
+      margin-bottom: 4px;
+    }
+    input[type="text"], select, textarea {
+      width: 100%;
+      box-sizing: border-box;
+      background: #0d1017;
+      color: #e5e7eb;
+      border: 1px solid #374151;
+      border-radius: 6px;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+    .row {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      margin-top: 6px;
+    }
+    button {
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #374151; }
+    button.success { background: #059669; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      text-align: center;
+    }
+    .stat-box {
+      background: #0d1017;
+      border-radius: 6px;
+      padding: 6px 4px;
+    }
+    .stat-val { font-size: 14px; font-weight: 700; color: #f9fafb; }
+    .stat-lbl { font-size: 10px; color: #9ca3af; }
+    #feedback {
+      font-size: 11px;
+      color: #93c5fd;
+      min-height: 16px;
+      margin-top: 6px;
+      word-break: break-word;
+    }
+    #feedback.error { color: #f87171; }
+  </style>
+</head>
+<body>
+  <h1>
+    <span id="connDot" class="dot"></span>
+    <span>Frontier Flow &amp; AI Studio Bridge</span>
+  </h1>
+
+  <div class="card">
+    <label for="bridgeUrl">Bridge Server URL (Local :8081 or VPS :8080)</label>
+    <div class="row" style="margin-top:0;">
+      <input id="bridgeUrl" type="text" placeholder="http://127.0.0.1:8081">
+      <button id="saveUrlBtn">Save</button>
+    </div>
+    <div id="connText" style="margin-top:6px;color:#9ca3af;font-size:11px;">Checking bridge status...</div>
+  </div>
+
+  <div class="card">
+    <div class="stats">
+      <div class="stat-box"><div id="statClients" class="stat-val">0</div><div class="stat-lbl">Clients</div></div>
+      <div class="stat-box"><div id="statPending" class="stat-val">0</div><div class="stat-lbl">Pending</div></div>
+      <div class="stat-box"><div id="statClaimed" class="stat-val">0</div><div class="stat-lbl">Claimed</div></div>
+      <div class="stat-box"><div id="statDone" class="stat-val">0</div><div class="stat-lbl">Done</div></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="jobSelect">Active / Queued Bridge Job</label>
+    <select id="jobSelect"></select>
+    <textarea id="promptPreview" rows="4" readonly style="margin-top:6px;" placeholder="No bridge jobs queued yet."></textarea>
+    <div class="row">
+      <button id="copyPromptBtn">Copy Prompt</button>
+      <button id="dispatchTabBtn" class="secondary">Open Tab</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="manualFile">1-Click Upload Capture (PNG for Flow / WAV-MP3-WebM for AI Studio)</label>
+    <input id="manualFile" type="file" accept=".png,.wav,.mp3,.webm,.ogg,.m4a,.flac" style="width:100%;color:#d1d5db;font-size:11px;">
+    <div class="row">
+      <button id="uploadBtn" class="success" style="width:100%;">Upload Capture to Selected Job</button>
+    </div>
+    <div id="feedback"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

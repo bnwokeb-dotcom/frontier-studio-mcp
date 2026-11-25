@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   H3_ESTIMATE_USD_PER_SECOND,
   H3_REAL_LENGTHS,
+  VULTR_PRICING_PER_SECOND,
   type VideoLaneRequest,
 } from '../../src/lanes/video.js';
 import { VultrLane } from '../../src/lanes/vultr.js';
@@ -94,14 +95,32 @@ const submitScript = (enqueue: ReturnType<typeof laneWith>['enqueue']) => {
 const posted = (calls: RecordedCall[]) => calls.find((c) => c.method === 'POST');
 
 describe('VultrLane pricing + H3 constants', () => {
-  it('quotes H3_ESTIMATE_USD_PER_SECOND × durationS', () => {
+  it('quotes H3_ESTIMATE_USD_PER_SECOND × durationS for standard ($0.09/s) with clean 4-decimal rounding', () => {
     const { lane } = laneWith();
-    expect(H3_ESTIMATE_USD_PER_SECOND).toBe(0.153);
-    expect(lane.estimatePrice(baseReq({ durationS: 4 }))).toBeCloseTo(0.612, 12);
-    expect(lane.estimatePrice(baseReq({ durationS: 6 }))).toBeCloseTo(0.918, 12);
-    expect(lane.estimatePrice(baseReq({ durationS: 8 }))).toBeCloseTo(1.224, 12);
-    expect(lane.estimatePrice(baseReq({ durationS: 15 }))).toBeCloseTo(2.295, 12);
+    expect(H3_ESTIMATE_USD_PER_SECOND).toBe(0.09);
+    expect(VULTR_PRICING_PER_SECOND).toEqual({
+      turbo: 0.06,
+      standard: 0.09,
+      max: 0.18,
+      '2K': 0.18,
+      '4K': 0.18,
+      ultra: 0.30,
+    });
+    expect(lane.estimatePrice(baseReq({ durationS: 4 }))).toBe(0.36);
+    expect(lane.estimatePrice(baseReq({ durationS: 6 }))).toBe(0.54);
+    expect(lane.estimatePrice(baseReq({ durationS: 8 }))).toBe(0.72);
+    expect(lane.estimatePrice(baseReq({ durationS: 15 }))).toBe(1.35);
     expect(lane.cameraVocabulary).toBe('named');
+  });
+
+  it('quotes per-quality Vultr live pricing tiers across turbo, standard, max, 2K, 4K, and ultra', () => {
+    const { lane } = laneWith();
+    expect(lane.estimatePrice(baseReq({ quality: 'turbo', durationS: 10 }))).toBe(0.6);
+    expect(lane.estimatePrice(baseReq({ quality: 'standard', durationS: 10 }))).toBe(0.9);
+    expect(lane.estimatePrice(baseReq({ quality: 'max', durationS: 10 }))).toBe(1.8);
+    expect(lane.estimatePrice(baseReq({ quality: '2K', durationS: 8 }))).toBe(1.44);
+    expect(lane.estimatePrice(baseReq({ quality: '4K', durationS: 15 }))).toBe(2.7);
+    expect(lane.estimatePrice(baseReq({ quality: 'ultra', durationS: 5 }))).toBe(1.5);
   });
 
   it('carries the H3 real-lengths table (whole 24fps blocks run long)', () => {
@@ -182,6 +201,29 @@ describe('VultrLane.submit', () => {
     expect(ref.jobId).toBe('vid-fixture-0001'); // 202 → { id, status pending }
   });
 
+  it('forwards 21:9 aspect_ratio and 4K quality cleanly while preserving { frame_type, type, image_url }', async () => {
+    const { lane, calls, enqueue } = laneWith();
+    submitScript(enqueue);
+    const plate = Buffer.from('plate-21-9');
+    await lane.submit(baseReq({
+      aspectRatio: '21:9',
+      quality: '4K',
+      durationS: 6,
+      firstFrame: { data: plate, mimeType: 'image/png' },
+    }));
+    const body = JSON.parse(posted(calls)?.body as string);
+    expect(body.aspect_ratio).toBe('21:9');
+    expect(body.quality).toBe('4K');
+    expect(body.duration).toBe(6);
+    expect(body.frame_images).toEqual([
+      {
+        frame_type: 'first_frame',
+        type: 'first_frame',
+        image_url: { url: `data:image/png;base64,${plate.toString('base64')}` },
+      },
+    ]);
+  });
+
   it('sends a provided firstFrame as one first_frame data-URL entry', async () => {
     const { lane, calls, enqueue } = laneWith();
     submitScript(enqueue);
@@ -190,6 +232,7 @@ describe('VultrLane.submit', () => {
     const body = JSON.parse(posted(calls)?.body as string);
     expect(body.frame_images).toEqual([
       {
+        frame_type: 'first_frame',
         type: 'first_frame',
         image_url: { url: `data:image/png;base64,${plate.toString('base64')}` },
       },
@@ -204,6 +247,7 @@ describe('VultrLane.submit', () => {
     const body = JSON.parse(posted(calls)?.body as string);
     expect(body.frame_images).toEqual([
       {
+        frame_type: 'last_frame',
         type: 'last_frame',
         image_url: { url: `data:image/jpeg;base64,${tail.toString('base64')}` },
       },

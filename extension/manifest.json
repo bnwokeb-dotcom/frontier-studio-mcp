@@ -1,0 +1,48 @@
+{
+  "manifest_version": 3,
+  "name": "Frontier Flow & AI Studio Bridge",
+  "version": "1.0.0",
+  "description": "Bridges logged-in Google AI Pro (flow.google Nano Banana 2.5 & aistudio.google.com) to frontier-studio-mcp for zero-API 4K sheets, plates, and dialogue captures.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://flow.google/*",
+    "https://labs.google/*",
+    "https://aistudio.google.com/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*",
+    "http://159.203.139.253:*/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Frontier Flow & AI Studio Bridge"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://flow.google/*",
+        "https://labs.google/fx/*"
+      ],
+      "js": [
+        "content_flow.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://aistudio.google.com/*"
+      ],
+      "js": [
+        "content_aistudio.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -1,7 +1,9 @@
 // src/http.ts — HTTP & SSE transport server for remote MCP clients and static artifact streaming.
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { stat, readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { stat, readFile, readdir, writeFile, mkdir, rename } from 'node:fs/promises';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
 import { extname, isAbsolute, relative, resolve, join } from 'node:path';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -10,12 +12,17 @@ import { studioPaths } from './store/paths.js';
 import { filmShow, filmCreate, filmMetaOrThrow, type FilmMeta } from './store/film.js';
 import { shotShow, shotCreate, shotUpdate, type ShotRecord } from './store/shot.js';
 import { readJson, writeJsonAtomic } from './store/fs.js';
-import { readJobs, updateJob } from './store/jobs.js';
+import { readJobs, updateJob, type VideoJobEntry } from './store/jobs.js';
 import { generateFcpxmlString } from './tools/editor.js';
-import { submitShotRender } from './tools/video.js';
+import { submitShotRender, jobEntryOrThrow, reconcileJobDownload, refundDeadJob } from './tools/video.js';
 import { VultrLane } from './lanes/vultr.js';
 import { loadConfig } from './config.js';
 import type { VideoQuality } from './lanes/video.js';
+import { probeMedia } from './qa/critic.js';
+import { StudioError } from './errors.js';
+import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
+
+const execFileAsync = promisify(execFileCb);
 
 const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -65,8 +72,9 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
   const root = resolve(opts.studioRoot);
   const version = opts.version || '0.1.0';
   const sessions = new Map<string, { transport: SSEServerTransport; mcpServer: McpServer }>();
+  const bridgeServer = new WebBridgeServer({ studioRoot: root, queue: getSharedBridgeQueue(root) });
 
-  const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const dispatchRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // CORS headers for browser clients
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
@@ -82,17 +90,30 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     const rawUrl = req.url ?? '/';
 
     // Global traversal guard
-    if (rawUrl.includes('..') || rawUrl.includes('%2e%2e') || rawUrl.includes('%2E%2E')) {
+    if (rawUrl.includes('..') || rawUrl.toLowerCase().includes('%2e%2e')) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Forbidden' }));
       return;
     }
 
-    const parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid request URL or Host header' }));
+      return;
+    }
     const pathname = parsedUrl.pathname;
 
+    // Google AI Pro Browser Extension Bridge API (/bridge/*)
+    if (pathname === '/bridge' || pathname.startsWith('/bridge/')) {
+      await bridgeServer.handleRequest(req, res);
+      return;
+    }
+
     // Web Director Console UI & Landing Page
-    if (req.method === 'GET' && (pathname === '/' || pathname === '/studio')) {
+    if (req.method === 'GET' && pathname === '/studio') {
       const consolePath = resolve(process.cwd(), 'web', 'studio.html');
       try {
         const content = await readFile(consolePath, 'utf8');
@@ -110,6 +131,48 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
         res.end(content);
         return;
       } catch {}
+    }
+
+    const discoveryPayload = {
+      service: 'frontier-studio-mcp',
+      mode: 'hybrid-studio-and-mcp',
+      version,
+      studioRoot: root,
+      endpoints: {
+        studio_ui: '/studio',
+        landing_ui: '/landing',
+        sse: '/sse',
+        messages: '/messages',
+        health: '/health',
+        bridge_status: '/bridge/status',
+        bridge_jobs: '/bridge/jobs',
+        artifacts: '/artifacts/*',
+        films: '/api/films',
+        fcpxml: '/api/export/fcpxml',
+      },
+    };
+
+    if (req.method === 'GET' && pathname === '/api/info') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(discoveryPayload));
+      return;
+    }
+
+    // Content-negotiated Root: Browsers receive the Studio Console UI, headless/API clients receive MCP discovery JSON
+    if (req.method === 'GET' && pathname === '/') {
+      const accept = String(req.headers.accept ?? '');
+      if (accept.includes('text/html')) {
+        const consolePath = resolve(process.cwd(), 'web', 'studio.html');
+        try {
+          const content = await readFile(consolePath, 'utf8');
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end(content);
+          return;
+        } catch {}
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(discoveryPayload));
+      return;
     }
 
     // ── 1. Dynamic Projects List API ──────────────────────────────────────────
@@ -306,62 +369,180 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     if (req.method === 'POST' && pathname === '/api/jobs/poll') {
       try {
         const body = await readBodyJson(req);
-        const filmId = body.film_id || 'film_heart_of_colossus';
-        const jobId = body.job_id;
+        const filmId = typeof body?.film_id === 'string' && body.film_id.trim() ? body.film_id.trim() : 'film_heart_of_colossus';
+        const jobId = typeof body?.job_id === 'string' ? body.job_id.trim() : '';
         if (!jobId) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'job_id is required' }));
           return;
         }
+        if (
+          filmId.includes('..') || filmId.includes('/') || filmId.includes('\\')
+          || jobId.includes('..') || jobId.includes('/') || jobId.includes('\\')
+        ) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid film_id or job_id' }));
+          return;
+        }
 
-        const cfg = loadConfig();
-        const apiKey = cfg.vultrApiKey || process.env.VULTR_INFERENCE_API_KEY || '';
+        const paths = studioPaths(root);
+        await filmMetaOrThrow(paths, filmId);
+        await jobEntryOrThrow(paths, filmId, jobId);
+
+        const cfg = loadConfig({ ...process.env, STUDIO_ROOT: process.env.STUDIO_ROOT || root });
+        const apiKey = cfg.vultrApiKey || '';
+        if (!apiKey) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'VULTR_INFERENCE_API_KEY is not set' }));
+          return;
+        }
         const lane = new VultrLane(apiKey);
         const jobStatus = await lane.status({ jobId });
-        const paths = studioPaths(root);
 
         if (jobStatus.status === 'completed') {
-          // Download video artifact and store on disk
           const artifact = await lane.result({ jobId });
+          // Money-law order: settle provider charge BEFORE saving/probing MP4
+          await reconcileJobDownload(paths, filmId, jobId, artifact.costUsd, 'http_job_poll');
+
           const rendersDir = join(paths.rendersDir(filmId), jobId);
           await mkdir(rendersDir, { recursive: true });
           const mp4Path = join(rendersDir, 'shot.mp4');
           await writeFile(mp4Path, artifact.data);
 
-          await updateJob(paths, filmId, jobId, (j) => ({
-            ...j,
-            status: 'completed',
-            cost_usd: artifact.costUsd,
-          }));
+          const probe = await probeMedia(mp4Path);
+          const isProbeValid =
+            probe.exists &&
+            probe.hasVideo &&
+            probe.width > 0 &&
+            probe.height > 0 &&
+            probe.durationS > 0.05 &&
+            !(probe.nbFrames > 0 && probe.nbFrames < 2);
+
+          let ffmpegDecodeError: string | undefined;
+          if (isProbeValid) {
+            try {
+              await execFileAsync('ffmpeg', ['-v', 'error', '-i', mp4Path, '-frames:v', '1', '-f', 'null', '-']);
+            } catch (e: unknown) {
+              ffmpegDecodeError = (e as { stderr?: string; message?: string }).stderr || (e as Error).message || 'ffmpeg_decode_error';
+            }
+          }
+
+          if (!isProbeValid || ffmpegDecodeError) {
+            await rename(mp4Path, join(rendersDir, 'shot.corrupt.mp4')).catch(() => {});
+            await updateJob(paths, filmId, jobId, (j) => {
+              const next: VideoJobEntry = {
+                ...j,
+                status: 'failed',
+                error_verbatim: 'downloaded video failed ffprobe decode validation',
+                actual_cost_usd: artifact.costUsd,
+              };
+              delete next.artifact_path;
+              delete next.note;
+              return next;
+            });
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(
+              JSON.stringify({
+                status: 'failed',
+                jobId,
+                error: `downloaded video failed probeMedia/ffmpeg decode validation (${ffmpegDecodeError ?? probe.error ?? 'invalid video stream'})`,
+              }),
+            );
+            return;
+          }
+
+          // Best-effort tail frame extraction for downstream continuous chaining
+          await execFileAsync('ffmpeg', [
+            '-y', '-sseof', '-0.1', '-i', mp4Path, '-frames:v', '1', '-q:v', '2', join(rendersDir, 'tail_frame.png'),
+          ]).catch(() => {});
+
+          const durationS = Number(probe.durationS.toFixed(2));
+          const resolution = `${probe.width}x${probe.height}`;
+          await updateJob(paths, filmId, jobId, (j) => {
+            const next: VideoJobEntry = {
+              ...j,
+              status: 'completed',
+              artifact_path: mp4Path,
+              actual_cost_usd: artifact.costUsd,
+              ...(artifact.realSeconds !== undefined ? { real_seconds: artifact.realSeconds } : {}),
+              width: probe.width,
+              height: probe.height,
+              resolution,
+              fps: probe.fps,
+              duration_s: durationS,
+              has_audio: probe.hasAudio,
+            };
+            delete next.note;
+            delete next.error_verbatim;
+            return next;
+          });
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({
-            status: 'completed',
-            progress: 100,
-            jobId,
-            videoUrl: `/artifacts/films/${filmId}/renders/${jobId}/shot.mp4`,
-            costUsd: artifact.costUsd,
-            duration: artifact.realSeconds || 5.0,
-          }));
+          res.end(
+            JSON.stringify({
+              status: 'completed',
+              progress: 100,
+              jobId,
+              videoUrl: `/artifacts/films/${filmId}/renders/${jobId}/shot.mp4`,
+              costUsd: artifact.costUsd,
+              duration: artifact.realSeconds || durationS,
+              width: probe.width,
+              height: probe.height,
+              fps: probe.fps,
+              resolution,
+            }),
+          );
           return;
         }
 
-        await updateJob(paths, filmId, jobId, (j) => ({
-          ...j,
-          status: jobStatus.status as any,
-          progress: jobStatus.progress,
-        }));
+        let refundNote: string | undefined;
+        if (
+          jobStatus.status === 'failed'
+          || jobStatus.status === 'cancelled'
+          || jobStatus.status === 'expired'
+        ) {
+          refundNote = await refundDeadJob(paths, filmId, jobId, 'http_job_poll');
+        }
+
+        await updateJob(paths, filmId, jobId, (j) => {
+          const next: VideoJobEntry = {
+            ...j,
+            status: jobStatus.status,
+          };
+          if (jobStatus.status === 'failed' && jobStatus.errorVerbatim !== undefined) {
+            next.error_verbatim = jobStatus.errorVerbatim;
+          } else {
+            delete next.error_verbatim;
+          }
+          if (refundNote !== undefined) {
+            next.note = refundNote;
+          }
+          return next;
+        });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({
-          status: jobStatus.status,
-          progress: jobStatus.progress,
-          jobId,
-        }));
+        res.end(
+          JSON.stringify({
+            status: jobStatus.status,
+            progress: jobStatus.progress,
+            jobId,
+            ...(jobStatus.errorVerbatim !== undefined ? { error_verbatim: jobStatus.errorVerbatim } : {}),
+            ...(refundNote !== undefined ? { note: refundNote } : {}),
+          }),
+        );
         return;
       } catch (err: any) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: err.message }));
+        let status = 500;
+        if (err instanceof SyntaxError) status = 400;
+        else if (err instanceof StudioError) {
+          if (err.code === 'VALIDATION') status = 400;
+          else if (err.code === 'NOT_FOUND') status = 404;
+          else if (err.code === 'AUTH') status = 401;
+          else if (err.code === 'BUDGET') status = 402;
+          else status = 502;
+        }
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err?.message || 'Internal error' }));
         return;
       }
     }
@@ -481,6 +662,17 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     // Default 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
+  };
+
+  const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+    dispatchRequest(req, res).catch((err) => {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error)?.message || 'Internal server error' }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
   });
 
   return {
@@ -497,6 +689,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       sessions.clear();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
+        server.closeIdleConnections?.();
       });
     },
   };

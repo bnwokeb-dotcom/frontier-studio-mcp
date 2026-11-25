@@ -1,9 +1,21 @@
-// test/http.test.ts — HTTP server, SSE handshake, and static artifact streaming tests.
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
+// test/http.test.ts — HTTP server, headless discovery, SSE handshake, bridge routes, job poll QC, and static artifact streaming tests.
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdtemp, rm, writeFile, mkdir, stat, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { execFile as execFileCb } from 'node:child_process';
+import { promisify } from 'node:util';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { startHttpServer, type StudioHttpServer } from '../src/http.js';
+import { studioPaths } from '../src/store/paths.js';
+import { filmCreate, filmShow } from '../src/store/film.js';
+import { appendLine } from '../src/store/fs.js';
+import { recordSpend } from '../src/budget.js';
+import { appendJob, readJobs } from '../src/store/jobs.js';
+import { VultrLane } from '../src/lanes/vultr.js';
+
+const execFile = promisify(execFileCb);
 
 describe('StudioHttpServer', () => {
   let root: string;
@@ -24,6 +36,8 @@ describe('StudioHttpServer', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
     await server.close();
     await rm(root, { recursive: true, force: true });
   });
@@ -129,5 +143,348 @@ describe('StudioHttpServer', () => {
       expect(text).toContain('/messages?sessionId=');
       await reader.cancel().catch(() => {});
     }
+  });
+
+  it('serves JSON discovery on GET / (API) and serves Studio & Landing UIs on /studio, /landing, and HTML GET /', async () => {
+    const res = await fetch(`${baseUrl}/`, { headers: { Accept: 'application/json' } });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('application/json');
+    const body = await res.json();
+    expect(body).toEqual({
+      service: 'frontier-studio-mcp',
+      mode: 'hybrid-studio-and-mcp',
+      version: '0.1.0',
+      studioRoot: root,
+      endpoints: {
+        studio_ui: '/studio',
+        landing_ui: '/landing',
+        sse: '/sse',
+        messages: '/messages',
+        health: '/health',
+        bridge_status: '/bridge/status',
+        bridge_jobs: '/bridge/jobs',
+        artifacts: '/artifacts/*',
+        films: '/api/films',
+        fcpxml: '/api/export/fcpxml',
+      },
+    });
+
+    const htmlRoot = await fetch(`${baseUrl}/`, { headers: { Accept: 'text/html' } });
+    expect(htmlRoot.status).toBe(200);
+    expect(htmlRoot.headers.get('Content-Type')).toContain('text/html');
+
+    const studio = await fetch(`${baseUrl}/studio`);
+    expect(studio.status).toBe(200);
+    expect(studio.headers.get('Content-Type')).toContain('text/html');
+    expect(await studio.text()).toContain('FRONTIER STUDIO OS');
+
+    const landing = await fetch(`${baseUrl}/landing`);
+    expect(landing.status).toBe(200);
+    expect(landing.headers.get('Content-Type')).toContain('text/html');
+    expect(await landing.text()).toContain('VIDUX TOOL');
+  });
+
+  it('mounts /bridge/status cleanly on StudioHttpServer', async () => {
+    const res = await fetch(`${baseUrl}/bridge/status?client_id=test-http-bridge`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe('ok');
+    expect(data.connectedClients).toBeGreaterThanOrEqual(1);
+    expect(typeof data.pendingTasks).toBe('number');
+  });
+
+  it('connects an MCP Client via SSEClientTransport over /sse and /messages', async () => {
+    const client = new Client({ name: 'http-sse-test', version: '0.1.0' });
+    const transport = new SSEClientTransport(new URL(`${baseUrl}/sse`));
+    await client.connect(transport);
+    try {
+      const listed = await client.listTools();
+      expect(listed.tools.length).toBe(34);
+      const created = await client.callTool({
+        name: 'film_create',
+        arguments: { film_id: 'film_sse', title: 'SSE Test', logline: 'Headless SSE roundtrip', budget_usd: 10 },
+      });
+      expect((created as { isError?: boolean }).isError).not.toBe(true);
+      const shown = await client.callTool({ name: 'film_show', arguments: {} });
+      expect(JSON.stringify(shown)).toContain('film_sse');
+    } finally {
+      await client.close();
+    }
+  });
+
+  it('POST /api/jobs/poll rejects non-MP4 corrupt bytes via probeMedia without marking completed', async () => {
+    const paths = studioPaths(root);
+    await filmCreate(paths, 'film_poll', { title: 'Poll Guard', logline: 'Decode guard test' });
+    await appendJob(paths, 'film_poll', {
+      job_id: 'vid-poll-corrupt',
+      shot_id: 's1',
+      lane: 'vultr',
+      status: 'in_progress',
+      submitted_ts: new Date().toISOString(),
+      prompt_version: 'h3-v1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    vi.stubEnv('VULTR_INFERENCE_API_KEY', 'test-vultr-key');
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-corrupt`) {
+        return new Response(
+          JSON.stringify({ id: 'vid-poll-corrupt', status: 'completed', progress: 100, usage: { cost: 0.45 } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-corrupt/content`) {
+        return new Response(Buffer.from('NOT_A_VALID_MP4_STREAM'), { status: 200 });
+      }
+      return originalFetch(input, init);
+    });
+
+    const res = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll', job_id: 'vid-poll-corrupt' }),
+    });
+    expect(res.status).toBe(502);
+    const body = await res.json();
+    expect(body.status).toBe('failed');
+    expect(body.error).toMatch(/probeMedia|decode/i);
+
+    const jobs = await readJobs(paths, 'film_poll');
+    expect(jobs[0].status).toBe('failed');
+    expect(jobs[0].artifact_path).toBeUndefined();
+    await expect(stat(join(paths.rendersDir('film_poll'), 'vid-poll-corrupt', 'shot.mp4'))).rejects.toThrow();
+    await expect(stat(join(paths.rendersDir('film_poll'), 'vid-poll-corrupt', 'shot.corrupt.mp4'))).resolves.toBeTruthy();
+  });
+
+  it('POST /api/jobs/poll accepts valid FFmpeg MP4 bytes after probeMedia & ffmpeg verification', async () => {
+    const paths = studioPaths(root);
+    await filmCreate(paths, 'film_poll_ok', { title: 'Poll Ok', logline: 'Decode pass test' });
+    await appendJob(paths, 'film_poll_ok', {
+      job_id: 'vid-poll-valid',
+      shot_id: 's1',
+      lane: 'vultr',
+      status: 'in_progress',
+      submitted_ts: new Date().toISOString(),
+      prompt_version: 'h3-v1',
+    });
+
+    const validMp4Path = join(root, 'sample_valid.mp4');
+    await execFile('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=24:duration=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      validMp4Path,
+    ]);
+    const validMp4Bytes = await (await import('node:fs/promises')).readFile(validMp4Path);
+
+    const originalFetch = globalThis.fetch;
+    vi.stubEnv('VULTR_INFERENCE_API_KEY', 'test-vultr-key');
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-valid`) {
+        return new Response(
+          JSON.stringify({ id: 'vid-poll-valid', status: 'completed', progress: 100, usage: { cost: 0.45 }, output: { duration: 5.17 } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-valid/content`) {
+        return new Response(validMp4Bytes, { status: 200, headers: { 'Content-Type': 'video/mp4' } });
+      }
+      return originalFetch(input, init);
+    });
+
+    const res = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll_ok', job_id: 'vid-poll-valid' }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('completed');
+    expect(body.videoUrl).toBe('/artifacts/films/film_poll_ok/renders/vid-poll-valid/shot.mp4');
+
+    const jobs = await readJobs(paths, 'film_poll_ok');
+    expect(jobs[0].status).toBe('completed');
+    expect(jobs[0].width).toBe(320);
+    expect(jobs[0].height).toBe(180);
+  });
+
+  it('POST /api/jobs/poll returns 404 for unknown film_id or job_id without creating renders/ directories', async () => {
+    const paths = studioPaths(root);
+    const originalFetch = globalThis.fetch;
+    vi.stubEnv('VULTR_INFERENCE_API_KEY', 'test-vultr-key');
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr.startsWith(VultrLane.BASE_URL)) {
+        fetchSpy(urlStr);
+        return new Response('should not poll Vultr on missing film/job', { status: 500 });
+      }
+      return originalFetch(input, init);
+    });
+
+    const missingFilmRes = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_missing', job_id: 'vid-ghost' }),
+    });
+    expect(missingFilmRes.status).toBe(404);
+    await expect(stat(paths.filmDir('film_missing'))).rejects.toThrow();
+
+    await filmCreate(paths, 'film_poll_404', { title: 'Poll 404', logline: 'Missing job test' });
+    const missingJobRes = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll_404', job_id: 'vid-ghost' }),
+    });
+    expect(missingJobRes.status).toBe(404);
+    await expect(stat(paths.rendersDir('film_poll_404'))).rejects.toThrow();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/jobs/poll reconciles completed actual cost delta onto film.json and ledger.jsonl', async () => {
+    const paths = studioPaths(root);
+    await filmCreate(paths, 'film_poll_reconcile', { title: 'Poll Reconcile', logline: 'Reconcile test', budgetUsd: 10 });
+    await recordSpend(paths, 'film_poll_reconcile', 0.45);
+    await appendLine(paths.ledgerPath('film_poll_reconcile'), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: 'render_shot',
+      lane: 'vultr',
+      film_id: 'film_poll_reconcile',
+      cost_usd: 0.45,
+      verdict: 'pending',
+      job_id: 'vid-poll-reconcile',
+      artifact_path: '',
+      estimated: true,
+    }));
+    await appendJob(paths, 'film_poll_reconcile', {
+      job_id: 'vid-poll-reconcile',
+      shot_id: 's1',
+      lane: 'vultr',
+      status: 'pending',
+      submitted_ts: new Date().toISOString(),
+      prompt_version: 'h3-v1',
+    });
+
+    const validMp4Path = join(root, 'sample_reconcile.mp4');
+    await execFile('ffmpeg', [
+      '-y', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=24:duration=1',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+      validMp4Path,
+    ]);
+    const validMp4Bytes = await readFile(validMp4Path);
+
+    const originalFetch = globalThis.fetch;
+    vi.stubEnv('VULTR_INFERENCE_API_KEY', 'test-vultr-key');
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-reconcile`) {
+        return new Response(
+          JSON.stringify({ id: 'vid-poll-reconcile', status: 'completed', progress: 100, usage: { cost: 0.55 }, output: { duration: 5.1 } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-reconcile/content`) {
+        return new Response(validMp4Bytes, { status: 200, headers: { 'Content-Type': 'video/mp4' } });
+      }
+      return originalFetch(input, init);
+    });
+
+    const res = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll_reconcile', job_id: 'vid-poll-reconcile' }),
+    });
+    expect(res.status).toBe(200);
+
+    const film = await filmShow(paths, 'film_poll_reconcile');
+    expect(film.spentUsd).toBeCloseTo(0.55, 6);
+
+    const ledgerRaw = await readFile(paths.ledgerPath('film_poll_reconcile'), 'utf8');
+    const lines = ledgerRaw.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatchObject({
+      job_id: 'vid-poll-reconcile',
+      note: 'reconcile',
+      cost_usd: 0.1,
+    });
+  });
+
+  it('POST /api/jobs/poll refunds reserved estimate idempotently onto film.json and ledger.jsonl when job fails', async () => {
+    const paths = studioPaths(root);
+    await filmCreate(paths, 'film_poll_refund', { title: 'Poll Refund', logline: 'Refund test', budgetUsd: 10 });
+    await recordSpend(paths, 'film_poll_refund', 0.45);
+    await appendLine(paths.ledgerPath('film_poll_refund'), JSON.stringify({
+      ts: new Date().toISOString(),
+      tool: 'render_shot',
+      lane: 'vultr',
+      film_id: 'film_poll_refund',
+      cost_usd: 0.45,
+      verdict: 'pending',
+      job_id: 'vid-poll-fail',
+      artifact_path: '',
+      estimated: true,
+    }));
+    await appendJob(paths, 'film_poll_refund', {
+      job_id: 'vid-poll-fail',
+      shot_id: 's1',
+      lane: 'vultr',
+      status: 'pending',
+      submitted_ts: new Date().toISOString(),
+      prompt_version: 'h3-v1',
+    });
+
+    const originalFetch = globalThis.fetch;
+    vi.stubEnv('VULTR_INFERENCE_API_KEY', 'test-vultr-key');
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+      if (urlStr === `${VultrLane.BASE_URL}/videos/vid-poll-fail`) {
+        return new Response(
+          JSON.stringify({ id: 'vid-poll-fail', status: 'failed', progress: 20, error: 'safety filter triggered' }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return originalFetch(input, init);
+    });
+
+    const res1 = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll_refund', job_id: 'vid-poll-fail' }),
+    });
+    expect(res1.status).toBe(200);
+    const body1 = await res1.json();
+    expect(body1.status).toBe('failed');
+
+    const filmAfter1 = await filmShow(paths, 'film_poll_refund');
+    expect(filmAfter1.spentUsd).toBeCloseTo(0, 6);
+
+    const ledgerRaw1 = await readFile(paths.ledgerPath('film_poll_refund'), 'utf8');
+    const lines1 = ledgerRaw1.trim().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines1).toHaveLength(2);
+    expect(lines1[1]).toMatchObject({
+      job_id: 'vid-poll-fail',
+      note: 'refund',
+      cost_usd: -0.45,
+    });
+
+    const jobs1 = await readJobs(paths, 'film_poll_refund');
+    expect(jobs1[0]).toMatchObject({
+      status: 'failed',
+      error_verbatim: 'safety filter triggered',
+      note: 'estimate refunded (only completed jobs bill)',
+    });
+
+    // Idempotent second poll must not refund again
+    const res2 = await fetch(`${baseUrl}/api/jobs/poll`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ film_id: 'film_poll_refund', job_id: 'vid-poll-fail' }),
+    });
+    expect(res2.status).toBe(200);
+    const filmAfter2 = await filmShow(paths, 'film_poll_refund');
+    expect(filmAfter2.spentUsd).toBeCloseTo(0, 6);
+    const ledgerRaw2 = await readFile(paths.ledgerPath('film_poll_refund'), 'utf8');
+    expect(ledgerRaw2.trim().split('\n')).toHaveLength(2);
   });
 });

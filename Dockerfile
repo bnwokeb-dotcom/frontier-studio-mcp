@@ -31,7 +31,7 @@ ENV STUDIO_ROOT=/data/studio
 COPY package*.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 
-# Copy compiled artifacts from builder stage and static web assets
+# Copy compiled artifacts and Web Studio UI
 COPY --from=builder /app/dist ./dist
 COPY web ./web
 

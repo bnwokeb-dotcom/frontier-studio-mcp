@@ -28,6 +28,12 @@ export interface VideoJobEntry {
   width?: number;
   height?: number;
   has_audio?: boolean;
+  fps?: number;
+  resolution?: string;
+  duration_s?: number;
+  qc_verdict?: 'kept' | 'rejected';
+  qc_score?: number;
+  qc_issues?: string[];
 }
 
 // Missing file → [] (no jobs submitted yet). Malformed JSON stays LOUD: a
