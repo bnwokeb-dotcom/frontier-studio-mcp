@@ -45,6 +45,8 @@ export interface MediaProbeResult {
   nbFrames: number;
   videoCodec?: string;
   audioCodec?: string;
+  audioSampleRate?: number;
+  audioChannels?: number;
   error?: string;
 }
 
@@ -142,6 +144,8 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult> {
         avg_frame_rate?: string;
         duration?: string;
         nb_frames?: string;
+        sample_rate?: string;
+        channels?: number;
       }>;
       format?: { duration?: string };
     };
@@ -153,10 +157,16 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult> {
     const width = Number(videoStream?.width ?? 0);
     const height = Number(videoStream?.height ?? 0);
     const fps = parseFrameRate(videoStream?.avg_frame_rate) || parseFrameRate(videoStream?.r_frame_rate);
-    const rawDuration = Number(videoStream?.duration ?? audioStream?.duration ?? parsed.format?.duration ?? 0);
-    const durationS = Number.isFinite(rawDuration) && rawDuration > 0 ? Number(rawDuration.toFixed(3)) : 0;
+    const rawDuration = [videoStream?.duration, audioStream?.duration, parsed.format?.duration]
+      .map((v) => Number(v))
+      .find((n) => Number.isFinite(n) && n > 0) ?? 0;
+    const durationS = Number(rawDuration.toFixed(3));
     const rawNbFrames = Number(videoStream?.nb_frames ?? 0);
     const nbFrames = Number.isFinite(rawNbFrames) && rawNbFrames > 0 ? rawNbFrames : 0;
+    const rawSampleRate = Number(audioStream?.sample_rate ?? 0);
+    const audioSampleRate = Number.isFinite(rawSampleRate) && rawSampleRate > 0 ? rawSampleRate : undefined;
+    const rawChannels = Number(audioStream?.channels ?? 0);
+    const audioChannels = Number.isFinite(rawChannels) && rawChannels > 0 ? rawChannels : undefined;
 
     return {
       exists: true,
@@ -170,6 +180,8 @@ export async function probeMedia(filePath: string): Promise<MediaProbeResult> {
       nbFrames,
       videoCodec: videoStream?.codec_name,
       audioCodec: audioStream?.codec_name,
+      audioSampleRate,
+      audioChannels,
     };
   } catch {
     return {
