@@ -912,7 +912,7 @@ describe('repair_shot', () => {
     // the SUPPLIED frame is the identity carrier — the plate is not sent
     const body = postedBody(1); // POST #0 was the parent render_shot
     expect(body.frame_images).toEqual([
-      { type: 'first_frame', image_url: { url: `data:image/png;base64,${Buffer.from(FINAL_FRAME_BYTES).toString('base64')}` } },
+      { frame_type: 'first_frame', type: 'first_frame', image_url: { url: `data:image/png;base64,${Buffer.from(FINAL_FRAME_BYTES).toString('base64')}` } },
     ]);
 
     // lineage in jobs.json

@@ -190,6 +190,7 @@ describe('VultrLane.submit', () => {
     const body = JSON.parse(posted(calls)?.body as string);
     expect(body.frame_images).toEqual([
       {
+        frame_type: 'first_frame',
         type: 'first_frame',
         image_url: { url: `data:image/png;base64,${plate.toString('base64')}` },
       },
@@ -204,6 +205,7 @@ describe('VultrLane.submit', () => {
     const body = JSON.parse(posted(calls)?.body as string);
     expect(body.frame_images).toEqual([
       {
+        frame_type: 'last_frame',
         type: 'last_frame',
         image_url: { url: `data:image/jpeg;base64,${tail.toString('base64')}` },
       },

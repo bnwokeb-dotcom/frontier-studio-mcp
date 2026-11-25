@@ -123,7 +123,7 @@ export class VultrLane implements VideoLane {
     // The per-process cache makes this free after the first call.
     await this.verifyModel();
 
-    const frameImages: Array<{ type: string; image_url: { url: string } }> = [];
+    const frameImages: Array<{ frame_type: string; image_url: { url: string } }> = [];
     if (req.firstFrame) frameImages.push(frameEntry('first_frame', req.firstFrame));
     if (req.lastFrame) frameImages.push(frameEntry('last_frame', req.lastFrame));
 
@@ -379,9 +379,10 @@ export class VultrLane implements VideoLane {
   }
 }
 
-// data:image/png;base64,… in image_url.url (bring-up verifies acceptance).
+// data:image/png;base64,… in image_url.url (Vultr expects frame_type; type kept for backwards compat).
 function frameEntry(frameType: 'first_frame' | 'last_frame', f: { data: Buffer; mimeType: string }) {
   return {
+    frame_type: frameType,
     type: frameType,
     image_url: { url: `data:${f.mimeType};base64,${f.data.toString('base64')}` },
   };
