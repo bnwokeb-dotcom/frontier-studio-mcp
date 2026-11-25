@@ -6,6 +6,10 @@
   const BANNER_ID = 'frontier-flow-bridge-banner';
   let currentJob = null;
   let activeObserver = null;
+  let settledCurrentJob = false;
+  let capturing = false;
+  let pendingCaptureTimer = null;
+  let attemptedMedia = new WeakMap();
 
   async function copyText(text) {
     try {
@@ -89,16 +93,23 @@
     return blobToBase64(pngBlob);
   }
 
-  function findLargestCandidateMedia(ignoreSet) {
+  function mediaSignature(el) {
+    if (!el) return '';
+    return el.tagName === 'IMG' ? (el.currentSrc || el.src || '') : `${el.width}x${el.height}`;
+  }
+
+  function findLargestCandidateMedia(ignoreSet, skipAttempted = false) {
     const candidates = [];
     for (const img of document.querySelectorAll('img')) {
       if (ignoreSet && ignoreSet.has(img)) continue;
       if (!img.complete || img.naturalWidth < 512 || img.naturalHeight < 256) continue;
+      if (skipAttempted && attemptedMedia.get(img) === mediaSignature(img)) continue;
       candidates.push({ el: img, area: img.naturalWidth * img.naturalHeight });
     }
     for (const canvas of document.querySelectorAll('canvas')) {
       if (ignoreSet && ignoreSet.has(canvas)) continue;
       if (canvas.width < 512 || canvas.height < 256) continue;
+      if (skipAttempted && attemptedMedia.get(canvas) === mediaSignature(canvas)) continue;
       candidates.push({ el: canvas, area: canvas.width * canvas.height });
     }
     candidates.sort((a, b) => b.area - a.area);
@@ -202,6 +213,13 @@
           mimeType: file.type || 'image/png',
         });
         if (resp?.ok) {
+          if (currentJob && currentJob.id === job.id) {
+            settledCurrentJob = true;
+            if (activeObserver) {
+              activeObserver.disconnect();
+              activeObserver = null;
+            }
+          }
           setStatusMessage(`Saved to studio: ${resp.result?.output_path || 'sheet/plate.png'}`);
         } else {
           setStatusMessage(resp?.error || 'Upload rejected by bridge server', true);
@@ -221,6 +239,8 @@
   }
 
   async function sendCapturedMedia(job, el) {
+    if (capturing) return false;
+    capturing = true;
     try {
       setStatusMessage('Extracting uncompressed PNG bytes...');
       const dataBase64 = await extractImageAsPngBase64(el);
@@ -231,16 +251,23 @@
         mimeType: 'image/png',
       });
       if (resp?.ok) {
-        if (activeObserver) {
-          activeObserver.disconnect();
-          activeObserver = null;
+        if (currentJob && currentJob.id === job.id) {
+          settledCurrentJob = true;
+          if (activeObserver) {
+            activeObserver.disconnect();
+            activeObserver = null;
+          }
         }
         setStatusMessage(`Completed & saved atomically (${resp.result?.width}x${resp.result?.height}).`);
-      } else {
-        setStatusMessage(`Bridge rejected capture: ${resp?.error || 'unknown error'}`, true);
+        return true;
       }
+      setStatusMessage(`Bridge rejected capture: ${resp?.error || 'unknown error'}`, true);
+      return false;
     } catch (err) {
       setStatusMessage(err.message || 'Image capture failed', true);
+      return false;
+    } finally {
+      capturing = false;
     }
   }
 
@@ -275,12 +302,21 @@
     el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
   }
 
+  function isVisibleEnabledControl(el) {
+    if (!el || el.disabled) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    if (el.offsetParent === null) return false;
+    if (el.closest(`#${BANNER_ID}`)) return false;
+    return true;
+  }
+
   function trySelectHints(job) {
     const wantedTokens = [job.model_hint || 'Nano Banana 2.5', job.aspect_ratio || '16:9'];
     const clickables = document.querySelectorAll('button, [role="option"], [role="radio"], [role="menuitem"]');
     for (const token of wantedTokens) {
       const lower = String(token).toLowerCase();
       for (const el of clickables) {
+        if (!isVisibleEnabledControl(el)) continue;
         const text = (el.textContent || el.getAttribute('aria-label') || '').toLowerCase();
         if (text.includes(lower)) {
           el.click();
@@ -290,17 +326,50 @@
     }
   }
 
-  function findSubmitButton() {
-    const buttons = [...document.querySelectorAll('button')];
+  const EXACT_FLOW_ACTION_RE = /^(generate|create|dream|run|submit|send)(\s+(image|media|now))?$/i;
+
+  function matchesFlowLabel(el) {
+    const aria = (el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    return EXACT_FLOW_ACTION_RE.test(aria) || EXACT_FLOW_ACTION_RE.test(text);
+  }
+
+  function findSubmitButton(promptEl) {
+    const isCandidate = (b) =>
+      isVisibleEnabledControl(b) && !b.closest('nav, header, [role="navigation"], [role="banner"]');
+
+    const promptContainer = promptEl ? promptEl.closest('form, main, [role="main"]') : null;
+    if (promptContainer) {
+      const containerButtons = [...promptContainer.querySelectorAll('button')].filter(isCandidate);
+      const exactHit = containerButtons.find(matchesFlowLabel);
+      if (exactHit) return exactHit;
+      const submitHit = containerButtons.find((b) => b.type === 'submit');
+      if (submitHit) return submitHit;
+    }
+
+    const mainButtons = [...document.querySelectorAll('form button, main button, [role="main"] button')].filter(isCandidate);
+    const mainExact = mainButtons.find(matchesFlowLabel);
+    if (mainExact) return mainExact;
+    const mainSubmit = mainButtons.find((b) => b.type === 'submit');
+    if (mainSubmit) return mainSubmit;
+
+    const pageButtons = [...document.querySelectorAll('button')].filter(isCandidate);
     return (
-      buttons.find((b) => !b.disabled && /generate|create|dream|run/i.test(b.textContent || b.getAttribute('aria-label') || '')) ||
-      buttons.find((b) => !b.disabled && b.type === 'submit') ||
+      pageButtons.find(matchesFlowLabel) ||
+      pageButtons.find((b) => b.type === 'submit') ||
       null
     );
   }
 
   async function executeJob(job) {
     currentJob = job;
+    settledCurrentJob = false;
+    capturing = false;
+    if (pendingCaptureTimer) {
+      clearTimeout(pendingCaptureTimer);
+      pendingCaptureTimer = null;
+    }
+    attemptedMedia = new WeakMap();
     if (activeObserver) {
       activeObserver.disconnect();
       activeObserver = null;
@@ -323,7 +392,7 @@
     injectInputText(inputEl, job.prompt);
     trySelectHints(job);
 
-    const submitBtn = findSubmitButton();
+    const submitBtn = findSubmitButton(inputEl);
     if (!submitBtn) {
       setStatusMessage('Prompt injected & copied to clipboard. Click Generate in Flow, then click "Capture Visible Image".');
       return;
@@ -332,13 +401,14 @@
     setStatusMessage('Submitting generation to Flow & watching for >= 512px output...');
     submitBtn.click();
 
-    let settled = false;
     activeObserver = new MutationObserver(() => {
-      if (settled || !currentJob || currentJob.id !== job.id) return;
-      const fresh = findLargestCandidateMedia(existingMedia);
+      if (settledCurrentJob || capturing || pendingCaptureTimer || !currentJob || currentJob.id !== job.id) return;
+      const fresh = findLargestCandidateMedia(existingMedia, true);
       if (fresh) {
-        settled = true;
-        setTimeout(() => {
+        attemptedMedia.set(fresh, mediaSignature(fresh));
+        pendingCaptureTimer = setTimeout(() => {
+          pendingCaptureTimer = null;
+          if (!currentJob || currentJob.id !== job.id || settledCurrentJob) return;
           void sendCapturedMedia(job, fresh);
         }, 800);
       }
@@ -346,7 +416,7 @@
     activeObserver.observe(document.body, { childList: true, subtree: true, attributes: true });
 
     setTimeout(() => {
-      if (!settled && currentJob?.id === job.id) {
+      if (!settledCurrentJob && currentJob?.id === job.id) {
         setStatusMessage('Still waiting for new image — click "Capture Visible Image" or "Upload PNG" once rendered.');
       }
     }, 60000);

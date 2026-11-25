@@ -377,4 +377,65 @@ describe('Flow & AI Studio Prompt Tools', () => {
     expect(d2.bridge_connected).toBe(true);
     expect(d2.connected_clients).toBe(1);
   });
+
+  it('rejects empty film_id, whitespace-only dialogue lines, and maps BridgeRequestError to errValidation in bridge_job_result', async () => {
+    const paths = studioPaths(root);
+    await assetRegister(paths, 'film_colossus', {
+      kind: 'location',
+      assetId: 'loc_foundry',
+      descriptor: 'Basalt forge.',
+      geoBlock: 'N: furnace. Camera: south.',
+    });
+    await assetRegister(paths, 'film_colossus', {
+      kind: 'character',
+      assetId: 'char_corvus',
+      descriptor: 'Corvus Vance.',
+      voice: 'Deep baritone.',
+      acting: 'Economical stillness.',
+    });
+    await shotCreate(paths, 'film_colossus', {
+      id: 'seq01-shot03',
+      sequence: 'seq01',
+      action: 'Corvus stands silent.',
+      geoBlock: 'N: furnace. Camera: south.',
+      refs: [{ assetId: 'loc_foundry', role: 'location' }, { assetId: 'char_corvus', role: 'character' }],
+      camera: { lens: '50mm', move: 'static', reason: 'stillness' },
+      audioBlock: {
+        dialogue: [{ voiceRef: 'char_corvus', line: '   \t   ' }],
+      },
+      durationS: 4,
+    });
+
+    // 1. film_id: "" must NOT fall back to active film
+    for (const [name, args] of [
+      ['flow_prompt_sheet', { film_id: '', character_id: 'char_corvus' }],
+      ['flow_prompt_plate', { film_id: '   ', location_id: 'loc_foundry', light_statement: 'amber glow' }],
+      ['studio_prompt_dialogue', { film_id: '', shot_id: 'seq01-shot03' }],
+    ] as const) {
+      const res = await client.callTool({ name, arguments: args });
+      expect(isError(res)).toBe(true);
+      expect(textOf(res)).toMatch(/film_id is required/i);
+      expect(textOf(res)).toMatch(/NEXT:/);
+    }
+
+    // 2. Whitespace-only dialogue line rejected cleanly
+    const blankDialogue = await client.callTool({
+      name: 'studio_prompt_dialogue',
+      arguments: { shot_id: 'seq01-shot03' },
+    });
+    expect(isError(blankDialogue)).toBe(true);
+    expect(textOf(blankDialogue)).toMatch(/empty/i);
+    expect(textOf(blankDialogue)).toMatch(/NEXT:/);
+
+    // 3. BridgeRequestError (e.g., '%' or leading '.') in bridge_job_result maps to errValidation (-32602 + NEXT:)
+    for (const invalidJobId of ['bad%id', '.hidden']) {
+      const badJob = await client.callTool({
+        name: 'bridge_job_result',
+        arguments: { job_id: invalidJobId },
+      });
+      expect(isError(badJob)).toBe(true);
+      expect(textOf(badJob)).toMatch(/-32602/);
+      expect(textOf(badJob)).toMatch(/NEXT:/);
+    }
+  });
 });

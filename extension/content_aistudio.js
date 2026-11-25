@@ -6,6 +6,10 @@
   const BANNER_ID = 'frontier-aistudio-bridge-banner';
   let currentJob = null;
   let activeObserver = null;
+  let settledCurrentJob = false;
+  let capturing = false;
+  let pendingCaptureTimer = null;
+  const attemptedSrcs = new Set();
 
   async function copyText(text) {
     try {
@@ -49,6 +53,8 @@
   }
 
   async function captureAudioSource(job, audioSrc) {
+    if (capturing) return false;
+    capturing = true;
     try {
       setStatusMessage('Fetching generated audio stream...');
       const res = await fetch(audioSrc, { credentials: 'include' });
@@ -65,16 +71,23 @@
         mimeType: blob.type || 'audio/wav',
       });
       if (resp?.ok) {
-        if (activeObserver) {
-          activeObserver.disconnect();
-          activeObserver = null;
+        if (currentJob && currentJob.id === job.id) {
+          settledCurrentJob = true;
+          if (activeObserver) {
+            activeObserver.disconnect();
+            activeObserver = null;
+          }
         }
         setStatusMessage(`Normalized 48kHz WAV saved: ${resp.result?.output_path || 'dialogue.wav'}`);
-      } else {
-        setStatusMessage(`Bridge rejected audio: ${resp?.error || 'unknown error'}`, true);
+        return true;
       }
+      setStatusMessage(`Bridge rejected audio: ${resp?.error || 'unknown error'}`, true);
+      return false;
     } catch (err) {
       setStatusMessage(err.message || 'Audio capture failed', true);
+      return false;
+    } finally {
+      capturing = false;
     }
   }
 
@@ -178,6 +191,13 @@
           mimeType: file.type || 'audio/wav',
         });
         if (resp?.ok) {
+          if (currentJob && currentJob.id === job.id) {
+            settledCurrentJob = true;
+            if (activeObserver) {
+              activeObserver.disconnect();
+              activeObserver = null;
+            }
+          }
           setStatusMessage(`48kHz WAV saved: ${resp.result?.output_path || 'dialogue.wav'}`);
         } else {
           setStatusMessage(resp?.error || 'Audio rejected by bridge server', true);
@@ -226,10 +246,19 @@
     el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
   }
 
+  function isVisibleEnabledControl(el) {
+    if (!el || el.disabled) return false;
+    if (el.getAttribute('aria-disabled') === 'true') return false;
+    if (el.offsetParent === null) return false;
+    if (el.closest(`#${BANNER_ID}`)) return false;
+    return true;
+  }
+
   function trySelectVoicePersona(persona) {
     if (!persona) return;
     const lower = persona.toLowerCase();
     for (const el of document.querySelectorAll('button, [role="option"], mat-option, [role="menuitem"]')) {
+      if (!isVisibleEnabledControl(el)) continue;
       if ((el.textContent || '').trim().toLowerCase() === lower) {
         el.click();
         return;
@@ -237,28 +266,68 @@
     }
   }
 
-  function findRunButton() {
-    const buttons = [...document.querySelectorAll('button')];
-    return (
-      buttons.find((b) => !b.disabled && /\b(run|generate|speak)\b/i.test(b.textContent || b.getAttribute('aria-label') || '')) ||
-      null
-    );
+  const EXACT_AISTUDIO_RUN_RE = /^(run|generate|speak)(\s+(prompt|speech|audio|now))?$/i;
+
+  function matchesRunLabel(el) {
+    const aria = (el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+    const text = (el.textContent || '').replace(/\s+/g, ' ').trim();
+    return EXACT_AISTUDIO_RUN_RE.test(aria) || EXACT_AISTUDIO_RUN_RE.test(text);
   }
 
-  let settledCurrentJob = false;
+  function findRunButton(promptEl) {
+    const isCandidate = (b) =>
+      isVisibleEnabledControl(b) && !b.closest('nav, header, [role="navigation"], [role="banner"]');
+
+    const promptContainer = promptEl ? promptEl.closest('form, main, [role="main"]') : null;
+    if (promptContainer) {
+      const containerButtons = [...promptContainer.querySelectorAll('button')].filter(isCandidate);
+      const exactHit = containerButtons.find(matchesRunLabel);
+      if (exactHit) return exactHit;
+    }
+
+    const mainButtons = [...document.querySelectorAll('form button, main button, [role="main"] button')].filter(isCandidate);
+    const mainHit = mainButtons.find(matchesRunLabel);
+    if (mainHit) return mainHit;
+
+    const pageButtons = [...document.querySelectorAll('button')].filter(isCandidate);
+    return pageButtons.find(matchesRunLabel) || null;
+  }
+
+  function scheduleAudioCapture(job, audioSrc, delayMs) {
+    if (
+      !audioSrc ||
+      !currentJob ||
+      currentJob.id !== job.id ||
+      settledCurrentJob ||
+      capturing ||
+      pendingCaptureTimer ||
+      attemptedSrcs.has(audioSrc)
+    ) {
+      return;
+    }
+    attemptedSrcs.add(audioSrc);
+    pendingCaptureTimer = setTimeout(() => {
+      pendingCaptureTimer = null;
+      if (!currentJob || currentJob.id !== job.id || settledCurrentJob) return;
+      void captureAudioSource(job, audioSrc);
+    }, delayMs);
+  }
 
   window.addEventListener('frontier-bridge-audio-url', (ev) => {
     const detail = ev?.detail;
-    if (!detail?.url || !currentJob || settledCurrentJob) return;
-    settledCurrentJob = true;
-    setTimeout(() => {
-      if (currentJob) void captureAudioSource(currentJob, detail.url);
-    }, 300);
+    if (!detail?.url || !currentJob) return;
+    scheduleAudioCapture(currentJob, detail.url, 300);
   });
 
   async function executeJob(job) {
     currentJob = job;
     settledCurrentJob = false;
+    capturing = false;
+    if (pendingCaptureTimer) {
+      clearTimeout(pendingCaptureTimer);
+      pendingCaptureTimer = null;
+    }
+    attemptedSrcs.clear();
     if (activeObserver) {
       activeObserver.disconnect();
       activeObserver = null;
@@ -282,7 +351,7 @@
     }
 
     injectPromptText(inputEl, scriptText);
-    const runBtn = findRunButton();
+    const runBtn = findRunButton(inputEl);
     if (!runBtn) {
       setStatusMessage('Script injected & copied to clipboard. Click Run in AI Studio, then click "Capture Active Audio".');
       return;
@@ -292,13 +361,10 @@
     runBtn.click();
 
     activeObserver = new MutationObserver(() => {
-      if (settledCurrentJob || !currentJob || currentJob.id !== job.id) return;
-      const freshSrc = findCandidateAudioSrc(existingSrcs);
+      if (settledCurrentJob || capturing || pendingCaptureTimer || !currentJob || currentJob.id !== job.id) return;
+      const freshSrc = findCandidateAudioSrc(new Set([...existingSrcs, ...attemptedSrcs]));
       if (freshSrc) {
-        settledCurrentJob = true;
-        setTimeout(() => {
-          void captureAudioSource(job, freshSrc);
-        }, 600);
+        scheduleAudioCapture(job, freshSrc, 600);
       }
     });
     activeObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });

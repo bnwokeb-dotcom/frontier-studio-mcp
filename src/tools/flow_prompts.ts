@@ -11,7 +11,7 @@ import { shotShow, type CinematicsBlock } from '../store/shot.js';
 import { errNotFound, errValidation } from '../errors.js';
 import { characterSheetPrompt, keyframePrompt } from './prompts.js';
 import { guard, out } from './registry.js';
-import { getSharedBridgeQueue, type BridgeJob } from '../bridge/web_bridge_server.js';
+import { BridgeRequestError, getSharedBridgeQueue, type BridgeJob, type BridgeJobInput } from '../bridge/web_bridge_server.js';
 
 const AI_STUDIO_PERSONAS = ['Charon', 'Fenrir', 'Aoede', 'Puck', 'Kore'] as const;
 type AiStudioPersona = (typeof AI_STUDIO_PERSONAS)[number];
@@ -77,9 +77,20 @@ function assertSafeIdentifier(raw: string, field: string): string {
 
 async function resolveFilmOrThrow(paths: StudioPaths, explicitFilmId?: string): Promise<string> {
   await initStudio(paths);
-  const filmId = explicitFilmId ? assertSafeIdentifier(explicitFilmId, 'film_id') : await getActiveFilm(paths);
+  const filmId = explicitFilmId !== undefined ? assertSafeIdentifier(explicitFilmId, 'film_id') : await getActiveFilm(paths);
   await filmMetaOrThrow(paths, filmId);
   return filmId;
+}
+
+function enqueueBridgeJobOrThrow(studioRoot: string, input: BridgeJobInput): BridgeJob {
+  try {
+    return getSharedBridgeQueue(studioRoot).enqueue(input);
+  } catch (err) {
+    if (err instanceof BridgeRequestError) {
+      throw errValidation(err.message, 'pass clean alphanumeric/._- identifiers and non-empty prompt');
+    }
+    throw err;
+  }
 }
 
 async function readOptionalFile(filePath: string): Promise<string | undefined> {
@@ -193,7 +204,7 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
         const queue = getSharedBridgeQueue(studioRoot);
         let job: BridgeJob | undefined;
         if (a.dispatch_to_bridge) {
-          job = queue.enqueue({
+          job = enqueueBridgeJobOrThrow(studioRoot, {
             target: 'flow_sheet',
             film_id: filmId,
             asset_id: charId,
@@ -299,7 +310,7 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
         const queue = getSharedBridgeQueue(studioRoot);
         let job: BridgeJob | undefined;
         if (a.dispatch_to_bridge) {
-          job = queue.enqueue({
+          job = enqueueBridgeJobOrThrow(studioRoot, {
             target: 'flow_plate',
             film_id: filmId,
             asset_id: locId,
@@ -364,6 +375,12 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
         }
 
         const item = dialogueList[lineIdx - 1];
+        if (typeof item.line !== 'string' || !item.line.trim()) {
+          throw errValidation(
+            `shot "${shotId}" dialogue line ${lineIdx} is empty`,
+            'update the dialogue line text with shot_update before calling studio_prompt_dialogue',
+          );
+        }
         const voiceRef = item.voiceRef ? assertSafeIdentifier(item.voiceRef, 'voice_ref') : undefined;
 
         let voiceDesc: string | undefined;
@@ -406,7 +423,7 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
         const queue = getSharedBridgeQueue(studioRoot);
         let job: BridgeJob | undefined;
         if (a.dispatch_to_bridge) {
-          job = queue.enqueue({
+          job = enqueueBridgeJobOrThrow(studioRoot, {
             target: 'aistudio_voice',
             film_id: filmId,
             shot_id: shotId,
@@ -474,7 +491,15 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
       guard(async () => {
         const jobId = assertSafeIdentifier(a.job_id, 'job_id');
         const queue = getSharedBridgeQueue(studioRoot);
-        const job = queue.getJob(jobId);
+        let job: BridgeJob | undefined;
+        try {
+          job = queue.getJob(jobId);
+        } catch (err) {
+          if (err instanceof BridgeRequestError) {
+            throw errValidation(err.message, 'pass a valid bridge job_id');
+          }
+          throw err;
+        }
         if (!job) {
           throw errNotFound(
             `bridge job "${jobId}" not found`,

@@ -2,11 +2,14 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { spawn } from 'node:child_process';
+import net from 'node:net';
+import { EventEmitter } from 'node:events';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
-import { buildServer } from '../src/server.js';
+import { attachStdioShutdown, buildServer, parseBridgePort } from '../src/server.js';
 import { toMcpError } from '../src/tools/registry.js';
 import {
   errValidation, errNotFound, errAuth, errBudget, errLaneDown, errJobFailed,
@@ -244,6 +247,192 @@ describe('MCP registry tools', () => {
     expect(afterEmpty.sfx).toBe('rain'); // {} leaves the record intact
     expect(afterEmpty.dialogue).toEqual([{ line: 'hello' }]);
     expect(afterEmpty).toEqual(audio);
+  });
+
+  it('stdio mode stops WebBridgeServer and exits cleanly when stdin closes (and survives EADDRINUSE)', async () => {
+    const getFreePort = () =>
+      new Promise<number>((resolvePort, rejectPort) => {
+        const srv = net.createServer();
+        srv.once('error', rejectPort);
+        srv.listen(0, '127.0.0.1', () => {
+          const addr = srv.address();
+          const port = typeof addr === 'object' && addr ? addr.port : 0;
+          srv.close((err) => (err ? rejectPort(err) : resolvePort(port)));
+        });
+      });
+
+    const freePort = await getFreePort();
+    const tsxLoader = resolve(process.cwd(), 'node_modules/tsx/dist/esm/index.mjs');
+    const loaderUrl = new URL(`file:///${tsxLoader.replace(/\\/g, '/')}`).href;
+
+    // 1. Spawn stdio server with dedicated bridge port, confirm bridge is up, then close stdin -> must exit 0 & free port
+    const child = spawn(process.execPath, ['--import', loaderUrl, 'src/server.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env, STUDIO_ROOT: root, BRIDGE_PORT: String(freePort), MCP_TRANSPORT: 'stdio' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stderr = '';
+    child.stderr.on('data', (c) => {
+      stderr += c.toString();
+    });
+
+    // Wait until Chrome Bridge HTTP listener announces ready
+    await new Promise<void>((resolveReady, rejectReady) => {
+      const timer = setTimeout(() => rejectReady(new Error(`Timed out waiting for bridge start. stderr=${stderr}`)), 8000);
+      const onData = () => {
+        if (stderr.includes(`127.0.0.1:${freePort}`)) {
+          clearTimeout(timer);
+          child.stderr.off('data', onData);
+          resolveReady();
+        }
+      };
+      child.stderr.on('data', onData);
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        rejectReady(new Error(`Server exited prematurely (${code}). stderr=${stderr}`));
+      });
+    });
+
+    const bridgeStatus = await fetch(`http://127.0.0.1:${freePort}/bridge/status`);
+    expect(bridgeStatus.status).toBe(200);
+
+    // Close stdin and assert clean exit (code 0) within 4s (not orphaned by open TCP bridge!)
+    const exitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
+      const timer = setTimeout(() => {
+        child.kill('SIGKILL');
+        rejectExit(new Error(`Orphaned stdio process did not exit after stdin close. stderr=${stderr}`));
+      }, 4000);
+      child.once('exit', (code) => {
+        clearTimeout(timer);
+        resolveExit(code);
+      });
+      child.stdin.end();
+    });
+    expect(exitCode).toBe(0);
+
+    // Confirm port freePort was actually released (can re-bind immediately)
+    const rebindSrv = net.createServer();
+    await new Promise<void>((resolveBind, rejectBind) => {
+      rebindSrv.once('error', rejectBind);
+      rebindSrv.listen(freePort, '127.0.0.1', () => resolveBind());
+    });
+
+    // 2. EADDRINUSE guard: spawn stdio server while freePort is already occupied -> continues stdio MCP & exits 0 on stdin close
+    const childBusy = spawn(process.execPath, ['--import', loaderUrl, 'src/server.ts'], {
+      cwd: process.cwd(),
+      env: { ...process.env, STUDIO_ROOT: root, BRIDGE_PORT: String(freePort), MCP_TRANSPORT: 'stdio' },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderrBusy = '';
+    childBusy.stderr.on('data', (c) => {
+      stderrBusy += c.toString();
+    });
+
+    try {
+      await new Promise<void>((resolveReady, rejectReady) => {
+        const timer = setTimeout(() => rejectReady(new Error(`Timed out waiting for EADDRINUSE log. stderr=${stderrBusy}`)), 8000);
+        const onData = () => {
+          if (/EADDRINUSE|already in use|unavailable/i.test(stderrBusy)) {
+            clearTimeout(timer);
+            childBusy.stderr.off('data', onData);
+            resolveReady();
+          }
+        };
+        childBusy.stderr.on('data', onData);
+      });
+
+      const busyExitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
+        const timer = setTimeout(() => {
+          childBusy.kill('SIGKILL');
+          rejectExit(new Error(`EADDRINUSE stdio process did not exit on stdin close. stderr=${stderrBusy}`));
+        }, 4000);
+        childBusy.once('exit', (code) => {
+          clearTimeout(timer);
+          resolveExit(code);
+        });
+        childBusy.stdin.end();
+      });
+      expect(busyExitCode).toBe(0);
+    } finally {
+      await new Promise<void>((r) => rebindSrv.close(() => r()));
+    }
+  }, 20_000);
+
+  it('attachStdioShutdown is idempotent across stdin end/close, server.onclose, SIGINT, and SIGTERM', async () => {
+    expect(parseBridgePort(undefined)).toBe(8081);
+    expect(parseBridgePort('0')).toBe(0);
+    expect(parseBridgePort('disabled')).toBeNull();
+    expect(parseBridgePort('9099')).toBe(9099);
+
+    let stopCalls = 0;
+    let closeCalls = 0;
+    let signalExits: number[] = [];
+
+    const stdin = new EventEmitter();
+    const proc = new EventEmitter() as EventEmitter & { exit: (code?: number) => never };
+    proc.exit = ((code?: number) => {
+      signalExits.push(code ?? 0);
+      return undefined as never;
+    }) as (code?: number) => never;
+
+    const fakeServer = {
+      server: { onclose: undefined as (() => void) | undefined },
+      close: async () => {
+        closeCalls += 1;
+      },
+    };
+    const fakeBridge = {
+      stop: async () => {
+        stopCalls += 1;
+      },
+    };
+
+    const shutdown = attachStdioShutdown({
+      server: fakeServer,
+      bridge: fakeBridge,
+      stdin,
+      proc,
+      onExitSignal: (c) => signalExits.push(c),
+    });
+
+    // Fire multiple lifecycle events rapidly
+    stdin.emit('end');
+    stdin.emit('close');
+    fakeServer.server.onclose?.();
+    await shutdown();
+
+    expect(stopCalls).toBe(1);
+    expect(closeCalls).toBe(1);
+
+    // Signal test with fresh instance
+    let sigStop = 0;
+    let sigClose = 0;
+    const proc2 = new EventEmitter() as EventEmitter & { exit: (code?: number) => never };
+    proc2.exit = (() => undefined as never) as (code?: number) => never;
+    const stdin2 = new EventEmitter();
+    attachStdioShutdown({
+      server: {
+        server: {},
+        close: async () => {
+          sigClose += 1;
+        },
+      },
+      bridge: {
+        stop: async () => {
+          sigStop += 1;
+        },
+      },
+      stdin: stdin2,
+      proc: proc2,
+      onExitSignal: (c) => signalExits.push(c),
+    });
+
+    proc2.emit('SIGTERM');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(sigStop).toBe(1);
+    expect(sigClose).toBe(1);
+    expect(signalExits).toEqual([0]);
   });
 });
 

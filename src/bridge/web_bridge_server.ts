@@ -130,6 +130,21 @@ function assertContainedPath(rootDir: string, targetPath: string): void {
   }
 }
 
+function assertPlainObject(val: unknown, label: string): Record<string, unknown> {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) {
+    throw new BridgeRequestError(400, `${label} must be a JSON object`);
+  }
+  return val as Record<string, unknown>;
+}
+
+function safeDecodeURIComponent(raw: string, field: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new BridgeRequestError(400, `Malformed URL encoding in ${field}`);
+  }
+}
+
 function decodeBase64Payload(raw: string): Buffer {
   const trimmed = raw.trim();
   const commaIdx = trimmed.startsWith('data:') ? trimmed.indexOf(',') : -1;
@@ -140,18 +155,8 @@ function decodeBase64Payload(raw: string): Buffer {
   return Buffer.from(b64, 'base64');
 }
 
-function sniffAudioExtension(bytes: Buffer, mimeType?: string): string {
-  if (mimeType) {
-    const cleanMime = mimeType.split(';')[0].trim().toLowerCase();
-    if (cleanMime in MIME_TO_AUDIO_EXT) {
-      return MIME_TO_AUDIO_EXT[cleanMime];
-    }
-    if (cleanMime.startsWith('audio/') && cleanMime !== 'audio/octet-stream') {
-      throw new BridgeRequestError(400, `Unsupported audio mime_type "${cleanMime}"`);
-    }
-  }
-
-  // Fallback magic-byte sniffing when mime_type is omitted or generic octet-stream
+export function sniffAudioExtension(bytes: Buffer, mimeType?: string): string {
+  // Check magic bytes FIRST so mislabeled mime_type (e.g. default 'audio/wav' on WebM/MP3) gets the true container extension
   if (bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WAVE') {
     return '.wav';
   }
@@ -172,6 +177,17 @@ function sniffAudioExtension(bytes: Buffer, mimeType?: string): string {
   }
   if (bytes.length >= 8 && bytes.subarray(4, 8).toString('ascii') === 'ftyp') {
     return '.m4a';
+  }
+
+  // Fallback to mime_type when magic bytes are unrecognized
+  if (mimeType) {
+    const cleanMime = mimeType.split(';')[0].trim().toLowerCase();
+    if (cleanMime in MIME_TO_AUDIO_EXT) {
+      return MIME_TO_AUDIO_EXT[cleanMime];
+    }
+    if (cleanMime.startsWith('audio/') && cleanMime !== 'audio/octet-stream') {
+      throw new BridgeRequestError(400, `Unsupported audio mime_type "${cleanMime}"`);
+    }
   }
   return '.wav';
 }
@@ -291,6 +307,7 @@ export class BridgeQueue {
   }
 
   enqueue(input: BridgeJobInput): BridgeJob {
+    assertPlainObject(input, 'Job payload');
     if (!VALID_TARGETS.has(input.target)) {
       throw new BridgeRequestError(400, `Invalid target "${String(input.target)}"; use flow_sheet | flow_plate | aistudio_voice`);
     }
@@ -370,6 +387,7 @@ export class BridgeQueue {
 
   async completeJob(jobId: string, payload: BridgeCompletePayload): Promise<BridgeJob> {
     const cleanId = assertSafeId(jobId, 'job_id');
+    assertPlainObject(payload, 'Completion payload');
     const job = this.jobs.get(cleanId);
     if (!job) {
       throw new BridgeRequestError(404, `Bridge job "${cleanId}" not found`);
@@ -489,32 +507,48 @@ async function readJsonBody<T = Record<string, unknown>>(req: IncomingMessage): 
   return new Promise((resolveBody, rejectBody) => {
     const chunks: Buffer[] = [];
     let total = 0;
+    let settled = false;
+    const finishErr = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      rejectBody(err);
+    };
+    const finishOk = (val: T) => {
+      if (settled) return;
+      settled = true;
+      resolveBody(val);
+    };
+
     req.on('data', (chunk: Buffer) => {
+      if (settled) return;
       total += chunk.length;
       if (total > MAX_BODY_BYTES) {
-        rejectBody(new BridgeRequestError(413, 'Request body exceeds 64MB limit'));
+        finishErr(new BridgeRequestError(413, 'Request body exceeds 64MB limit'));
         req.destroy();
         return;
       }
       chunks.push(chunk);
     });
     req.on('end', () => {
+      if (settled) return;
       const raw = Buffer.concat(chunks).toString('utf8').trim();
       if (!raw) {
-        resolveBody({} as T);
+        finishOk({} as T);
         return;
       }
       try {
-        resolveBody(JSON.parse(raw) as T);
+        finishOk(JSON.parse(raw) as T);
       } catch {
-        rejectBody(new BridgeRequestError(400, 'Invalid JSON body'));
+        finishErr(new BridgeRequestError(400, 'Invalid JSON body'));
       }
     });
-    req.on('error', rejectBody);
+    req.on('aborted', () => finishErr(new BridgeRequestError(400, 'Request aborted')));
+    req.on('error', (err) => finishErr(err));
   });
 }
 
 function sendJson(res: ServerResponse, statusCode: number, body: unknown): void {
+  if (res.writableEnded || res.destroyed) return;
   if (!res.headersSent) {
     res.writeHead(statusCode, { 'Content-Type': 'application/json' });
   }
@@ -534,6 +568,7 @@ export class WebBridgeServer {
   private readonly queue: BridgeQueue;
   private server: http.Server | null = null;
   private running = false;
+  private startPromise: Promise<{ port: number; host: string }> | null = null;
 
   constructor(opts: WebBridgeServerOptions = {}) {
     this.host = opts.host ?? '127.0.0.1';
@@ -555,32 +590,37 @@ export class WebBridgeServer {
   }
 
   async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
-    if (!res.headersSent && !res.hasHeader('Access-Control-Allow-Origin')) {
-      res.setHeader('Access-Control-Allow-Origin', '*');
-      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', '*');
-    }
-    if (req.method === 'OPTIONS') {
-      res.writeHead(204);
-      res.end();
-      return true;
-    }
-
-    const rawUrl = req.url ?? '/';
-    if (rawUrl.includes('..') || rawUrl.includes('%2e%2e') || rawUrl.includes('%2E%2E')) {
-      sendJson(res, 403, { error: 'Forbidden' });
-      return true;
-    }
-
-    const hostHeader = req.headers.host || '127.0.0.1';
-    const parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
-    const pathname = parsedUrl.pathname;
-
-    if (pathname !== '/bridge' && !pathname.startsWith('/bridge/')) {
-      return false;
-    }
-
     try {
+      if (!res.headersSent && !res.hasHeader('Access-Control-Allow-Origin')) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', '*');
+      }
+      if (req.method === 'OPTIONS') {
+        if (!res.headersSent) res.writeHead(204);
+        if (!res.writableEnded) res.end();
+        return true;
+      }
+
+      const rawUrl = req.url ?? '/';
+      if (rawUrl.includes('..') || rawUrl.toLowerCase().includes('%2e%2e')) {
+        sendJson(res, 403, { error: 'Forbidden' });
+        return true;
+      }
+
+      const hostHeader = req.headers.host || '127.0.0.1';
+      let parsedUrl: URL;
+      try {
+        parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
+      } catch {
+        throw new BridgeRequestError(400, 'Invalid request URL or Host header');
+      }
+      const pathname = parsedUrl.pathname;
+
+      if (pathname !== '/bridge' && !pathname.startsWith('/bridge/')) {
+        return false;
+      }
+
       // GET /bridge/status
       if (req.method === 'GET' && pathname === '/bridge/status') {
         const clientId = parsedUrl.searchParams.get('client_id') || (req.headers['x-client-id'] as string | undefined);
@@ -620,7 +660,7 @@ export class WebBridgeServer {
       // POST /bridge/jobs/:id/complete
       const completeMatch = pathname.match(/^\/bridge\/jobs\/([^/]+)\/complete$/);
       if (req.method === 'POST' && completeMatch) {
-        const jobId = decodeURIComponent(completeMatch[1]);
+        const jobId = safeDecodeURIComponent(completeMatch[1], 'job_id');
         const body = await readJsonBody<BridgeCompletePayload>(req);
         const job = await this.queue.completeJob(jobId, body);
         sendJson(res, 200, {
@@ -642,7 +682,7 @@ export class WebBridgeServer {
       // GET /bridge/jobs/:id
       const jobMatch = pathname.match(/^\/bridge\/jobs\/([^/]+)$/);
       if (req.method === 'GET' && jobMatch) {
-        const jobId = decodeURIComponent(jobMatch[1]);
+        const jobId = safeDecodeURIComponent(jobMatch[1], 'job_id');
         const job = this.queue.getJob(jobId);
         if (!job) {
           sendJson(res, 404, { error: `Bridge job "${jobId}" not found` });
@@ -666,7 +706,11 @@ export class WebBridgeServer {
         sendJson(res, err.statusCode, { error: err.message });
         return true;
       }
-      sendJson(res, 500, { error: (err as Error).message || 'Internal bridge error' });
+      if (err instanceof URIError || err instanceof SyntaxError) {
+        sendJson(res, 400, { error: err.message });
+        return true;
+      }
+      sendJson(res, 500, { error: (err as Error)?.message || 'Internal bridge error' });
       return true;
     }
   }
@@ -675,36 +719,70 @@ export class WebBridgeServer {
     if (this.server && this.running) {
       return { port: this.port, host: this.host };
     }
+    if (this.startPromise) {
+      return this.startPromise;
+    }
     const srv = http.createServer((req, res) => {
-      void this.handleRequest(req, res).then((handled) => {
-        if (!handled && !res.headersSent) {
-          sendJson(res, 404, { error: 'Not found' });
-        }
-      });
+      this.handleRequest(req, res)
+        .then((handled) => {
+          if (!handled && !res.headersSent) {
+            sendJson(res, 404, { error: 'Not found' });
+          }
+        })
+        .catch((err) => {
+          if (!res.headersSent) {
+            const status = err instanceof BridgeRequestError ? err.statusCode : 500;
+            sendJson(res, status, { error: (err as Error)?.message || 'Internal bridge error' });
+          } else if (!res.writableEnded) {
+            res.end();
+          }
+        });
     });
     this.server = srv;
 
-    return new Promise((resolveStart, rejectStart) => {
-      srv.once('error', rejectStart);
+    this.startPromise = new Promise<{ port: number; host: string }>((resolveStart, rejectStart) => {
+      const onStartError = (err: Error) => {
+        this.server = null;
+        this.running = false;
+        this.startPromise = null;
+        rejectStart(err);
+      };
+      srv.once('error', onStartError);
       srv.listen(this.port, this.host, () => {
-        srv.off('error', rejectStart);
+        srv.off('error', onStartError);
+        srv.on('error', (err) => {
+          console.error(`[WebBridgeServer] Server error: ${err.message}`);
+        });
         const addr = srv.address();
         if (addr && typeof addr === 'object') {
           this.port = addr.port;
         }
         this.running = true;
+        this.startPromise = null;
         resolveStart({ port: this.port, host: this.host });
       });
     });
+    return this.startPromise;
   }
 
   async stop(): Promise<void> {
-    if (!this.server) return;
+    if (this.startPromise) {
+      await this.startPromise.catch(() => {});
+    }
     const srv = this.server;
+    if (!srv) return;
     this.server = null;
     this.running = false;
+    if (!srv.listening) return;
     await new Promise<void>((resolveStop, rejectStop) => {
-      srv.close((err) => (err ? rejectStop(err) : resolveStop()));
+      srv.close((err) => {
+        if (err && (err as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') {
+          rejectStop(err);
+        } else {
+          resolveStop();
+        }
+      });
+      srv.closeIdleConnections?.();
     });
   }
 }

@@ -95,12 +95,58 @@ async function installAiStudioMainHook(tabId) {
           } catch {}
         };
 
+        const detectAudioMagic = (bytes) => {
+          if (!bytes || bytes.length < 4) return null;
+          // RIFF....WAVE
+          if (
+            bytes.length >= 12 &&
+            bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+            bytes[8] === 0x57 && bytes[9] === 0x41 && bytes[10] === 0x56 && bytes[11] === 0x45
+          ) {
+            return 'audio/wav';
+          }
+          // ID3
+          if (bytes[0] === 0x49 && bytes[1] === 0x44 && bytes[2] === 0x33) {
+            return 'audio/mpeg';
+          }
+          // MP3 frame sync (\xFF\xFB / \xFF\xF3 / \xFF\xF2 / \xFF\xFA)
+          if (bytes[0] === 0xff && (bytes[1] & 0xe0) === 0xe0) {
+            return 'audio/mpeg';
+          }
+          // OggS
+          if (bytes[0] === 0x4f && bytes[1] === 0x67 && bytes[2] === 0x67 && bytes[3] === 0x53) {
+            return 'audio/ogg';
+          }
+          // WebM / Matroska EBML (\x1A\x45\xDF\xA3)
+          if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) {
+            return 'audio/webm';
+          }
+          // fLaC
+          if (bytes[0] === 0x66 && bytes[1] === 0x4c && bytes[2] === 0x61 && bytes[3] === 0x43) {
+            return 'audio/flac';
+          }
+          // ISO BMFF ftyp (M4A/MP4 audio)
+          if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+            return 'audio/mp4';
+          }
+          return null;
+        };
+
         const origCreateObjectURL = URL.createObjectURL.bind(URL);
         URL.createObjectURL = function (obj) {
           const url = origCreateObjectURL(obj);
           try {
-            if (obj instanceof Blob && (!obj.type || obj.type.startsWith('audio/'))) {
-              notify(url, obj.type || 'audio/wav');
+            if (obj instanceof Blob) {
+              if (obj.type && obj.type.startsWith('audio/')) {
+                notify(url, obj.type);
+              } else if (!obj.type && obj.size >= 4096) {
+                obj.slice(0, 12).arrayBuffer().then((buf) => {
+                  const detected = detectAudioMagic(new Uint8Array(buf));
+                  if (detected) {
+                    notify(url, detected);
+                  }
+                }).catch(() => {});
+              }
             }
           } catch {}
           return url;
@@ -109,7 +155,7 @@ async function installAiStudioMainHook(tabId) {
         const OrigAudio = window.Audio;
         window.Audio = function (src) {
           const el = new OrigAudio(src);
-          if (typeof src === 'string' && src) {
+          if (typeof src === 'string' && src && (src.startsWith('blob:') || src.startsWith('data:audio/') || src.startsWith('http'))) {
             notify(src, 'audio/wav');
           }
           return el;

@@ -68,7 +68,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
   const sessions = new Map<string, { transport: SSEServerTransport; mcpServer: McpServer }>();
   const bridgeServer = new WebBridgeServer({ studioRoot: root, queue: getSharedBridgeQueue(root) });
 
-  const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
+  const dispatchRequest = async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     // CORS headers for browser clients
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PATCH, OPTIONS');
@@ -84,13 +84,20 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     const rawUrl = req.url ?? '/';
 
     // Global traversal guard
-    if (rawUrl.includes('..') || rawUrl.includes('%2e%2e') || rawUrl.includes('%2E%2E')) {
+    if (rawUrl.includes('..') || rawUrl.toLowerCase().includes('%2e%2e')) {
       res.writeHead(403, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Forbidden' }));
       return;
     }
 
-    const parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid request URL or Host header' }));
+      return;
+    }
     const pathname = parsedUrl.pathname;
 
     // Google AI Pro Browser Extension Bridge API (/bridge/*)
@@ -489,6 +496,17 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
     // Default 404
     res.writeHead(404, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ error: 'Not found' }));
+  };
+
+  const server = http.createServer((req: IncomingMessage, res: ServerResponse) => {
+    dispatchRequest(req, res).catch((err) => {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error)?.message || 'Internal server error' }));
+      } else if (!res.writableEnded) {
+        res.end();
+      }
+    });
   });
 
   return {
@@ -505,6 +523,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
       sessions.clear();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
+        server.closeIdleConnections?.();
       });
     },
   };
