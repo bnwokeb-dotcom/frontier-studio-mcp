@@ -5,4 +5,5 @@ dist/
 scratch/
 studio_data/
 .mimosa/
+.worktrees/
 clones/nafay3d/zips/
