@@ -151,7 +151,9 @@ STUDIO_ROOT/
         ├── generated/              # staged/generated image assets attached via asset_image
         ├── audio/                  # 48kHz dialogue WAVs, diegetic stems, soundscapes, score_master.wav
         ├── shots/<shot_id>.json    # full shot records
-        ├── renders/<job_id>/       # shot.mp4 · tail_frame.png · shot_synced.mp4 · shot_graded_*.mp4 · rough_cut.mp4
+        ├── renders/
+        │   ├── rough_cut.mp4       # assembled rough cut MP4
+        │   └── <job_id>/           # shot.mp4 · tail_frame.png · shot_synced.mp4 · shot_graded_*.mp4
         ├── timelines/              # <timeline>.fcpxml · <timeline>.otio · <timeline>.edl · concat_manifest.txt
         ├── jobs.json               # async video-lane job handles (status, QC score/verdict, actual cost)
         └── ledger.jsonl            # append-only JSONL money ledger (reserve / reconcile / refund)

@@ -14,7 +14,7 @@ import { shotShow, shotCreate, shotUpdate, type ShotRecord } from './store/shot.
 import { readJson, writeJsonAtomic } from './store/fs.js';
 import { readJobs, updateJob, type VideoJobEntry } from './store/jobs.js';
 import { generateFcpxmlString } from './tools/editor.js';
-import { submitShotRender } from './tools/video.js';
+import { submitShotRender, jobEntryOrThrow, reconcileJobDownload, refundDeadJob } from './tools/video.js';
 import { VultrLane } from './lanes/vultr.js';
 import { loadConfig } from './config.js';
 import type { VideoQuality } from './lanes/video.js';
@@ -346,6 +346,10 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
           return;
         }
 
+        const paths = studioPaths(root);
+        await filmMetaOrThrow(paths, filmId);
+        await jobEntryOrThrow(paths, filmId, jobId);
+
         const cfg = loadConfig({ ...process.env, STUDIO_ROOT: process.env.STUDIO_ROOT || root });
         const apiKey = cfg.vultrApiKey || '';
         if (!apiKey) {
@@ -355,11 +359,12 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
         }
         const lane = new VultrLane(apiKey);
         const jobStatus = await lane.status({ jobId });
-        const paths = studioPaths(root);
-        const hasJobEntry = (await readJobs(paths, filmId)).some((j) => j.job_id === jobId);
 
         if (jobStatus.status === 'completed') {
           const artifact = await lane.result({ jobId });
+          // Money-law order: settle provider charge BEFORE saving/probing MP4
+          await reconcileJobDownload(paths, filmId, jobId, artifact.costUsd, 'http_job_poll');
+
           const rendersDir = join(paths.rendersDir(filmId), jobId);
           await mkdir(rendersDir, { recursive: true });
           const mp4Path = join(rendersDir, 'shot.mp4');
@@ -385,19 +390,17 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
 
           if (!isProbeValid || ffmpegDecodeError) {
             await rename(mp4Path, join(rendersDir, 'shot.corrupt.mp4')).catch(() => {});
-            if (hasJobEntry) {
-              await updateJob(paths, filmId, jobId, (j) => {
-                const next: VideoJobEntry = {
-                  ...j,
-                  status: 'failed',
-                  error_verbatim: 'downloaded video failed ffprobe decode validation',
-                  actual_cost_usd: artifact.costUsd,
-                };
-                delete next.artifact_path;
-                delete next.note;
-                return next;
-              });
-            }
+            await updateJob(paths, filmId, jobId, (j) => {
+              const next: VideoJobEntry = {
+                ...j,
+                status: 'failed',
+                error_verbatim: 'downloaded video failed ffprobe decode validation',
+                actual_cost_usd: artifact.costUsd,
+              };
+              delete next.artifact_path;
+              delete next.note;
+              return next;
+            });
             res.writeHead(502, { 'Content-Type': 'application/json' });
             res.end(
               JSON.stringify({
@@ -416,25 +419,24 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
 
           const durationS = Number(probe.durationS.toFixed(2));
           const resolution = `${probe.width}x${probe.height}`;
-          if (hasJobEntry) {
-            await updateJob(paths, filmId, jobId, (j) => {
-              const next: VideoJobEntry = {
-                ...j,
-                status: 'completed',
-                artifact_path: mp4Path,
-                actual_cost_usd: artifact.costUsd,
-                ...(artifact.realSeconds !== undefined ? { real_seconds: artifact.realSeconds } : {}),
-                width: probe.width,
-                height: probe.height,
-                resolution,
-                fps: probe.fps,
-                duration_s: durationS,
-                has_audio: probe.hasAudio,
-              };
-              delete next.error_verbatim;
-              return next;
-            });
-          }
+          await updateJob(paths, filmId, jobId, (j) => {
+            const next: VideoJobEntry = {
+              ...j,
+              status: 'completed',
+              artifact_path: mp4Path,
+              actual_cost_usd: artifact.costUsd,
+              ...(artifact.realSeconds !== undefined ? { real_seconds: artifact.realSeconds } : {}),
+              width: probe.width,
+              height: probe.height,
+              resolution,
+              fps: probe.fps,
+              duration_s: durationS,
+              has_audio: probe.hasAudio,
+            };
+            delete next.note;
+            delete next.error_verbatim;
+            return next;
+          });
 
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
@@ -454,18 +456,30 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
           return;
         }
 
-        if (hasJobEntry) {
-          await updateJob(paths, filmId, jobId, (j) => {
-            const next: VideoJobEntry = {
-              ...j,
-              status: jobStatus.status,
-            };
-            if (jobStatus.status === 'failed' && jobStatus.errorVerbatim !== undefined) {
-              next.error_verbatim = jobStatus.errorVerbatim;
-            }
-            return next;
-          });
+        let refundNote: string | undefined;
+        if (
+          jobStatus.status === 'failed'
+          || jobStatus.status === 'cancelled'
+          || jobStatus.status === 'expired'
+        ) {
+          refundNote = await refundDeadJob(paths, filmId, jobId, 'http_job_poll');
         }
+
+        await updateJob(paths, filmId, jobId, (j) => {
+          const next: VideoJobEntry = {
+            ...j,
+            status: jobStatus.status,
+          };
+          if (jobStatus.status === 'failed' && jobStatus.errorVerbatim !== undefined) {
+            next.error_verbatim = jobStatus.errorVerbatim;
+          } else {
+            delete next.error_verbatim;
+          }
+          if (refundNote !== undefined) {
+            next.note = refundNote;
+          }
+          return next;
+        });
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
@@ -473,6 +487,8 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
             status: jobStatus.status,
             progress: jobStatus.progress,
             jobId,
+            ...(jobStatus.errorVerbatim !== undefined ? { error_verbatim: jobStatus.errorVerbatim } : {}),
+            ...(refundNote !== undefined ? { note: refundNote } : {}),
           }),
         );
         return;

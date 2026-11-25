@@ -1,6 +1,6 @@
 // test/server.test.ts — MCP server wiring over the real in-memory transport
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -136,6 +136,22 @@ describe('MCP registry tools', () => {
     expect(JSON.stringify(shown)).toContain('slow push-in');
     expect(JSON.stringify(shown)).toContain('wind, distant ice crack');
     expect(JSON.stringify(shown)).toContain('She looks back once.');
+  });
+
+  it('asset_register with empty biological_markers {} does not write biological_markers.json', async () => {
+    await rpc('film_create', { film_id: 'film_bio', title: 'Bio', logline: 'Test' });
+    const res = await rpc('asset_register', {
+      film_id: 'film_bio',
+      kind: 'character',
+      asset_id: 'char_empty_bio',
+      descriptor: 'Tall courier in a weathered coat.',
+      voice: 'Baritone, measured pace.',
+      acting: 'Controlled stillness.',
+      biological_markers: {},
+    });
+    expect(isError(res)).toBe(false);
+    const markersPath = join(root, 'films', 'film_bio', 'assets', 'characters', 'char_empty_bio', 'biological_markers.json');
+    await expect(stat(markersPath)).rejects.toThrow();
   });
 
   it('shot_update maps snake_case patch keys and falls back to the active film', async () => {

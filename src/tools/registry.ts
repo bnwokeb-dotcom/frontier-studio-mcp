@@ -329,7 +329,7 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       voiceId: a.voice_id,
       voiceProvider: a.voice_provider,
       parentDna: a.parent_dna,
-      ...(biologicalMarkers ? { biologicalMarkers } : {}),
+      ...(biologicalMarkers && Object.keys(biologicalMarkers).length > 0 ? { biologicalMarkers } : {}),
     });
     return out(assetDir);
   }));
