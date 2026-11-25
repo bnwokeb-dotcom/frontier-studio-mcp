@@ -38,7 +38,7 @@
 // submit plain POST /v1/videos child jobs with parent_job_id lineage. Wiring
 // edits requires a verified request shape first (docs or live probe).
 import { z } from 'zod';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -55,8 +55,9 @@ import { findAssetKindDir } from '../store/asset.js';
 import { appendLine, ensureDir, readText } from '../store/fs.js';
 import { readJobs, updateJob } from '../store/jobs.js';
 import type { VideoJobEntry } from '../store/jobs.js';
-import { errNotFound, errValidation } from '../errors.js';
+import { errLaneDown, errNotFound, errValidation } from '../errors.js';
 import { recordSpend } from '../budget.js';
+import { auditTake, probeMedia } from '../qa/critic.js';
 import { composeH3Prompt } from './h3prompt.js';
 import type { H3DialogueLine } from './h3prompt.js';
 import { VultrLane } from '../lanes/vultr.js';
@@ -92,6 +93,37 @@ async function findPlate(
     }
   }
   return undefined;
+}
+
+async function firstExistingFile(candidates: string[]): Promise<string | undefined> {
+  for (const candidate of candidates) {
+    try {
+      const st = await stat(candidate);
+      if (st.isFile()) return candidate;
+    } catch {
+      // ignore missing reference candidates
+    }
+  }
+  return undefined;
+}
+
+async function resolveShotAuditRefs(
+  paths: StudioPaths,
+  filmId: string,
+  refs: ShotRef[],
+): Promise<{ referenceSheetPath?: string; referencePlatePath?: string }> {
+  const sheetCandidates = refs
+    .filter((r) => r.role === 'character')
+    .map((r) => `${paths.assetDir(filmId, 'characters', r.assetId)}/sheet.png`);
+  const plateCandidates = refs
+    .filter((r) => r.role === 'location' || r.role === 'style')
+    .map((r) => `${paths.assetDir(filmId, r.role === 'location' ? 'locations' : 'styles', r.assetId)}/plate.png`);
+
+  const [referenceSheetPath, referencePlatePath] = await Promise.all([
+    firstExistingFile(sheetCandidates),
+    firstExistingFile(plateCandidates),
+  ]);
+  return { referenceSheetPath, referencePlatePath };
 }
 
 // Hours until the provider drops the content (expires_at), rounded to 0.1h.
@@ -370,7 +402,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
   server.tool('render_shot', {
     shot_id: z.string(),
     film_id: z.string().optional(),
-    quality: z.enum(['turbo', 'standard', 'max', 'ultra']).optional(),
+    quality: z.enum(['turbo', 'standard', 'max', 'ultra', '2K', '4K']).optional(),
     aspect_ratio: z.enum(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']).optional(),
     chain_from_shot_id: z.string().optional(),
   }, async (a) => guard(async () => {
@@ -573,15 +605,56 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     }
 
     // 7. the artifact: <filmDir>/renders/<job_id>/shot.mp4
-    const artifactPath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/shot.mp4`;
-    await ensureDir(`${paths.filmDir(filmId)}/renders/${entry.job_id}`);
+    const jobDir = `${paths.filmDir(filmId)}/renders/${entry.job_id}`;
+    const artifactPath = `${jobDir}/shot.mp4`;
+    await ensureDir(jobDir);
     await writeFile(artifactPath, art.data);
 
+    // 7b. post-download decode verification via ffprobe before ever marking completed
+    const probe = await probeMedia(artifactPath);
+    if (!probe.exists || !probe.hasVideo || probe.durationS <= 0.05 || (probe.nbFrames > 0 && probe.nbFrames < 2)) {
+      await rename(artifactPath, `${jobDir}/shot.corrupt.mp4`).catch(() => {});
+      await updateJob(paths, filmId, entry.job_id, (e) => {
+        const next: VideoJobEntry = {
+          ...e,
+          status: 'failed',
+          error_verbatim: 'downloaded video failed ffprobe decode validation',
+          actual_cost_usd: art.costUsd,
+        };
+        delete next.artifact_path;
+        delete next.note;
+        return next;
+      });
+      throw errLaneDown(
+        `downloaded video failed probeMedia decode validation (${probe.error ?? 'invalid video stream'})`,
+        're-render with repair_shot',
+      );
+    }
+
     // Auto-extract tail frame for instant continuous chaining
-    const tailFramePath = `${paths.filmDir(filmId)}/renders/${entry.job_id}/tail_frame.png`;
+    const tailFramePath = `${jobDir}/tail_frame.png`;
     try {
       await execFileAsync('ffmpeg', ['-y', '-sseof', '-0.1', '-i', artifactPath, '-frames:v', '1', '-q:v', '2', tailFramePath]);
     } catch {}
+
+    // 7c. automated perceptual & signal QC via auditTake (local FFmpeg/FFprobe deterministic gate)
+    const shot = await shotShow(paths, filmId, entry.shot_id).catch(() => undefined);
+    const { referenceSheetPath, referencePlatePath } = await resolveShotAuditRefs(paths, filmId, shot?.refs ?? []);
+    const qc = await auditTake({
+      mp4Path: artifactPath,
+      shotId: entry.shot_id,
+      expectedAction: shot?.action ?? '',
+      referenceSheetPath,
+      referencePlatePath,
+      durationS: probe.durationS || shot?.durationS || 5,
+    });
+
+    const fps = probe.fps;
+    const resolution = `${probe.width}x${probe.height}`;
+    const durationS = Number(probe.durationS.toFixed(2));
+    const width = art.width ?? probe.width;
+    const height = art.height ?? probe.height;
+    const hasAudio = art.hasAudio ?? probe.hasAudio;
 
     // 8. jobs.json: the completed entry carries the artifact + the actual facts;
     //    the refund note and any failure text described interim states — the
@@ -593,9 +666,15 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
         artifact_path: artifactPath,
         actual_cost_usd: art.costUsd,
         ...(art.realSeconds !== undefined ? { real_seconds: art.realSeconds } : {}),
-        ...(art.width !== undefined ? { width: art.width } : {}),
-        ...(art.height !== undefined ? { height: art.height } : {}),
-        ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+        width,
+        height,
+        has_audio: hasAudio,
+        fps,
+        resolution,
+        duration_s: durationS,
+        qc_verdict: qc.verdict,
+        qc_score: qc.score,
+        qc_issues: qc.reasons,
       };
       delete next.note;
       delete next.error_verbatim;
@@ -611,9 +690,15 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       artifact_path: updated.artifact_path,
       actual_cost_usd: updated.actual_cost_usd,
       ...(art.realSeconds !== undefined ? { real_length_s: art.realSeconds } : {}),
-      ...(art.width !== undefined ? { width: art.width } : {}),
-      ...(art.height !== undefined ? { height: art.height } : {}),
-      ...(art.hasAudio !== undefined ? { has_audio: art.hasAudio } : {}),
+      width,
+      height,
+      has_audio: hasAudio,
+      fps,
+      resolution,
+      duration_s: durationS,
+      qc_verdict: qc.verdict,
+      qc_score: qc.score,
+      qc_issues: qc.reasons,
       ...(expiresIn !== null && expiresIn < 48
         ? { warning: `content expires in ${expiresIn}h — download or re-render` }
         : {}),

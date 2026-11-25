@@ -5,7 +5,16 @@
 // facts are VERIFIED (spec §12.1): only `completed` jobs bill (failed /
 // cancelled / expired cost $0); the actual charge lives in `usage.cost`.
 
-export type VideoQuality = 'turbo' | 'standard' | 'max' | 'ultra';
+export type VideoQuality = 'turbo' | 'standard' | 'max' | 'ultra' | '2K' | '4K';
+
+export const VULTR_PRICING_PER_SECOND: Record<VideoQuality, number> = {
+  turbo: 0.06,
+  standard: 0.09,
+  max: 0.18,
+  '2K': 0.18,
+  '4K': 0.18,
+  ultra: 0.30,
+};
 
 export interface VideoLaneRequest {
   prompt: string; // ≤8000 chars, enforced by caller + lane
@@ -46,7 +55,7 @@ export interface VideoLane {
   readonly cameraVocabulary: 'named';
   /** GET /v1/videos/models; absent → errLaneDown naming the check. */
   verifyModel(): Promise<'minimax-h3'>;
-  /** H3_ESTIMATE_USD_PER_SECOND × durationS. */
+  /** VULTR_PRICING_PER_SECOND[req.quality] × durationS. */
   estimatePrice(req: VideoLaneRequest): number;
   /** POST /v1/videos (202 → id, status pending). */
   submit(req: VideoLaneRequest): Promise<VideoJobRef>;
@@ -73,7 +82,7 @@ export const H3_REAL_LENGTHS: Record<number, number> = {
   15: 15.08,
 };
 
-// Estimate quote (the only input to the budget hard stop). Bring-up verifies
-// this against the Vultr pricing page; the ledger's actual spend always comes
-// from usage.cost (reconcile accrual, Task 4) — estimate drift is harmless.
-export const H3_ESTIMATE_USD_PER_SECOND = 0.153;
+// Verified live Vultr default ('standard' 768p) rate per second.
+// Used as the default budget-quote rate; actual spend always reconciles from
+// usage.cost on job_download.
+export const H3_ESTIMATE_USD_PER_SECOND = VULTR_PRICING_PER_SECOND.standard;

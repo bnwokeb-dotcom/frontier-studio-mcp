@@ -19,7 +19,7 @@ import type { StudioConfig } from '../config.js';
 import { errAuth, errJobFailed, errLaneDown, errValidation } from '../errors.js';
 import type { FetchLike } from './types.js';
 import {
-  H3_ESTIMATE_USD_PER_SECOND,
+  VULTR_PRICING_PER_SECOND,
   type VideoArtifact,
   type VideoJobRef,
   type VideoJobStatus,
@@ -85,7 +85,8 @@ export class VultrLane implements VideoLane {
   }
 
   estimatePrice(req: VideoLaneRequest): number {
-    return H3_ESTIMATE_USD_PER_SECOND * req.durationS;
+    const rate = VULTR_PRICING_PER_SECOND[req.quality] ?? VULTR_PRICING_PER_SECOND.standard;
+    return Math.round(rate * req.durationS * 10000) / 10000;
   }
 
   async verifyModel(): Promise<'minimax-h3'> {
