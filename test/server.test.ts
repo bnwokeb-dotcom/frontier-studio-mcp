@@ -37,13 +37,16 @@ const isError = (res: unknown) => (res as { isError?: boolean }).isError === tru
 const codeOf = (e: unknown) => (e as { code?: number }).code;
 
 describe('MCP registry tools', () => {
-  it('exposes all 29 production tools across all studio lanes', async () => {
+  it('exposes all 34 production tools across all studio lanes', async () => {
     const res = await client.listTools();
     expect(res.tools.map((t) => t.name).sort()).toEqual([
-      'acoustic_match', 'asset_image', 'asset_register', 'character_sheet_build', 'dialogue_import', 'dialogue_render', 'film_assemble', 'film_create',
-      'film_export_xml', 'film_grade', 'film_set_active', 'film_show', 'image_generate', 'job_download', 'job_status',
-      'keyframe_build', 'qc_vision_audit', 'render_shot', 'repair_shot', 'score_arrange_dynamic', 'sequence_lock_geo', 'shot_continuity_plan', 'shot_create', 'shot_lipsync', 'shot_show',
-      'shot_update', 'soundscape_build', 'staging_build', 'storyboard_build',
+      'acoustic_match', 'asset_image', 'asset_register', 'bridge_job_result', 'bridge_status',
+      'character_sheet_build', 'dialogue_import', 'dialogue_render', 'film_assemble', 'film_create',
+      'film_export_xml', 'film_grade', 'film_set_active', 'film_show', 'flow_prompt_plate',
+      'flow_prompt_sheet', 'image_generate', 'job_download', 'job_status', 'keyframe_build',
+      'qc_vision_audit', 'render_shot', 'repair_shot', 'score_arrange_dynamic', 'sequence_lock_geo',
+      'shot_continuity_plan', 'shot_create', 'shot_lipsync', 'shot_show', 'shot_update',
+      'soundscape_build', 'staging_build', 'storyboard_build', 'studio_prompt_dialogue',
     ]);
   });
 

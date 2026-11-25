@@ -16,6 +16,7 @@ import { submitShotRender } from './tools/video.js';
 import { VultrLane } from './lanes/vultr.js';
 import { loadConfig } from './config.js';
 import type { VideoQuality } from './lanes/video.js';
+import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
 
 const MIME_TYPES: Record<string, string> = {
   '.mp4': 'video/mp4',
@@ -65,6 +66,7 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
   const root = resolve(opts.studioRoot);
   const version = opts.version || '0.1.0';
   const sessions = new Map<string, { transport: SSEServerTransport; mcpServer: McpServer }>();
+  const bridgeServer = new WebBridgeServer({ studioRoot: root, queue: getSharedBridgeQueue(root) });
 
   const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
     // CORS headers for browser clients
@@ -90,6 +92,12 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
 
     const parsedUrl = new URL(rawUrl, `http://${hostHeader}`);
     const pathname = parsedUrl.pathname;
+
+    // Google AI Pro Browser Extension Bridge API (/bridge/*)
+    if (pathname === '/bridge' || pathname.startsWith('/bridge/')) {
+      await bridgeServer.handleRequest(req, res);
+      return;
+    }
 
     // Web Director Console UI & Landing Page
     if (req.method === 'GET' && (pathname === '/' || pathname === '/studio')) {

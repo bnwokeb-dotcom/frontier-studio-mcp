@@ -159,6 +159,72 @@ async function detectAudioVolume(filePath: string): Promise<{ maxVolumeDb: numbe
   };
 }
 
+export interface IngestAudioOptions {
+  sourcePath: string;
+  destPath: string;
+  label?: string;
+  normalizeLufs?: number;
+}
+
+export interface IngestAudioResult {
+  audioPath: string;
+  sampleRateHz: number;
+  channels: number;
+  durationS: number;
+  maxVolumeDb: number;
+  meanVolumeDb: number;
+}
+
+/**
+ * Validates a captured audio file (supported extension, decodable stream, non-silent > -75 dB peak)
+ * and atomically transcodes/normalizes it to 48kHz 16-bit mono PCM WAV at destPath.
+ */
+export async function ingestAndNormalizeAudio(opts: IngestAudioOptions): Promise<IngestAudioResult> {
+  const targetLufs = opts.normalizeLufs ?? -16;
+  if (!Number.isFinite(targetLufs) || targetLufs < -70 || targetLufs > -5) {
+    throw errValidation(
+      'normalize_lufs must be between -70 and -5 LUFS',
+      'omit normalize_lufs for -16 LUFS default or pass a value in [-70, -5]',
+    );
+  }
+  const label = opts.label ?? basename(opts.sourcePath);
+  const ext = extname(opts.sourcePath).toLowerCase();
+  if (!SUPPORTED_AUDIO_EXTS.has(ext)) {
+    throw errValidation(
+      `unsupported audio extension "${ext || label}"`,
+      'supported audio extensions: .wav, .mp3, .ogg, .webm, .m4a, .flac',
+    );
+  }
+  await requireValidAudioFile(opts.sourcePath, label);
+
+  const { maxVolumeDb, meanVolumeDb } = await detectAudioVolume(opts.sourcePath);
+  if (!Number.isFinite(maxVolumeDb) || maxVolumeDb < MIN_ACTIVE_PEAK_DB) {
+    throw errValidation(
+      `source audio "${label}" is silent or below noise floor (max_volume: ${Number.isFinite(maxVolumeDb) ? `${maxVolumeDb} dB` : '-inf dB'})`,
+      'capture non-silent speech (> -75 dB peak) and retry dialogue_import',
+    );
+  }
+
+  const outProbe = await execFfmpegWavAtomic(
+    [
+      '-y', '-nostdin', '-i', opts.sourcePath, '-vn',
+      '-af', `loudnorm=I=${targetLufs}:TP=-1.5:LRA=11`,
+      '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le',
+    ],
+    opts.destPath,
+    1,
+  );
+
+  return {
+    audioPath: opts.destPath,
+    sampleRateHz: outProbe.audioSampleRate ?? 48000,
+    channels: outProbe.audioChannels ?? 1,
+    durationS: outProbe.durationS,
+    maxVolumeDb,
+    meanVolumeDb: Number.isFinite(meanVolumeDb) ? meanVolumeDb : maxVolumeDb,
+  };
+}
+
 /**
  * Executes FFmpeg to a temporary WAV file, verifies 48kHz PCM audio via ffprobe, and atomically moves to destPath.
  */
@@ -477,40 +543,25 @@ export function registerAudioTools(server: McpServer, studioRoot: string): void 
         await shotShow(paths, filmId, a.shot_id);
 
         const resolvedSource = await resolveAudioSourcePath(studioRoot, paths.filmDir(filmId), a.source_audio_path);
-        await requireValidAudioFile(resolvedSource, a.source_audio_path);
-
-        const { maxVolumeDb, meanVolumeDb } = await detectAudioVolume(resolvedSource);
-        if (!Number.isFinite(maxVolumeDb) || maxVolumeDb < MIN_ACTIVE_PEAK_DB) {
-          throw errValidation(
-            `source audio "${a.source_audio_path}" is silent or below noise floor (max_volume: ${Number.isFinite(maxVolumeDb) ? `${maxVolumeDb} dB` : '-inf dB'})`,
-            'capture non-silent speech (> -75 dB peak) and retry dialogue_import',
-          );
-        }
-
         const lineIdx = a.line_index ?? 1;
-        const targetLufs = a.normalize_lufs ?? -16;
         const destPath = paths.audioPath(filmId, `${a.shot_id}_line_${lineIdx}.wav`);
-
-        const outProbe = await execFfmpegWavAtomic(
-          [
-            '-y', '-nostdin', '-i', resolvedSource, '-vn',
-            '-af', `loudnorm=I=${targetLufs}:TP=-1.5:LRA=11`,
-            '-ar', '48000', '-ac', '1', '-c:a', 'pcm_s16le',
-          ],
+        const ingested = await ingestAndNormalizeAudio({
+          sourcePath: resolvedSource,
           destPath,
-          1,
-        );
+          label: a.source_audio_path,
+          normalizeLufs: a.normalize_lufs,
+        });
 
         return out({
           film_id: filmId,
           shot_id: a.shot_id,
           line_index: lineIdx,
-          audio_path: destPath,
-          sample_rate_hz: outProbe.audioSampleRate ?? 48000,
-          channels: outProbe.audioChannels ?? 1,
-          duration_s: outProbe.durationS,
-          max_volume_db: maxVolumeDb,
-          mean_volume_db: Number.isFinite(meanVolumeDb) ? meanVolumeDb : maxVolumeDb,
+          audio_path: ingested.audioPath,
+          sample_rate_hz: ingested.sampleRateHz,
+          channels: ingested.channels,
+          duration_s: ingested.durationS,
+          max_volume_db: ingested.maxVolumeDb,
+          mean_volume_db: ingested.meanVolumeDb,
           zero_api_cost: true,
         });
       }),

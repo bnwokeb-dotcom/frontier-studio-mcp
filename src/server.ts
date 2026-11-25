@@ -10,8 +10,10 @@ import { registerAudioTools } from './tools/audio.js';
 import { registerStagingTools } from './tools/staging.js';
 import { registerStoryboardTools } from './tools/storyboard.js';
 import { registerEditorTools } from './tools/editor.js';
+import { registerFlowPromptTools } from './tools/flow_prompts.js';
 import { registerFilmmakerPrompts } from './prompts/filmmaker.js';
 import { startHttpServer } from './http.js';
+import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
 
 export function buildServer(opts: { studioRoot: string }): McpServer {
   const server = new McpServer({ name: 'frontier-studio-mcp', version: '0.1.0' });
@@ -22,6 +24,7 @@ export function buildServer(opts: { studioRoot: string }): McpServer {
   registerStagingTools(server, opts.studioRoot);
   registerStoryboardTools(server, opts.studioRoot);
   registerEditorTools(server, opts.studioRoot);
+  registerFlowPromptTools(server, opts.studioRoot);
   registerFilmmakerPrompts(server);
   return server;
 }
@@ -39,9 +42,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       host: cfg.host,
     });
     console.log(
-      `[frontier-studio-mcp] Remote SSE server running on http://${http.host}:${http.port} (SSE: /sse, Artifacts: /artifacts)`,
+      `[frontier-studio-mcp] Remote SSE server running on http://${http.host}:${http.port} (SSE: /sse, Artifacts: /artifacts, Bridge: /bridge/status)`,
     );
   } else {
+    const bridgePort = Number(process.env.BRIDGE_PORT) || 8081;
+    const bridge = new WebBridgeServer({
+      studioRoot: cfg.studioRoot,
+      port: bridgePort,
+      host: '127.0.0.1',
+      queue: getSharedBridgeQueue(cfg.studioRoot),
+    });
+    bridge.start().then((addr) => {
+      console.error(`[frontier-studio-mcp] Chrome Bridge HTTP listening on http://${addr.host}:${addr.port}/bridge/status`);
+    }).catch((err) => {
+      console.error(`[frontier-studio-mcp] Chrome Bridge HTTP unavailable on port ${bridgePort}: ${(err as Error).message}`);
+    });
     const server = buildServer({ studioRoot: cfg.studioRoot });
     await server.connect(new StdioServerTransport());
   }
