@@ -214,7 +214,15 @@ export class CanvasBridgeRunner {
             'check WebBridgeServer /bridge/jobs request payload',
           );
         }
-        const parsed = JSON.parse(raw) as { job?: BridgeJob };
+        let parsed: { job?: BridgeJob };
+        try {
+          parsed = JSON.parse(raw) as { job?: BridgeJob };
+        } catch {
+          throw errLaneDown(
+            `Canvas bridge returned invalid JSON on HTTP ${res.status}`,
+            'inspect WebBridgeServer /bridge/jobs response body',
+          );
+        }
         if (!parsed.job) {
           throw errLaneDown('Canvas bridge returned missing job object', 'inspect WebBridgeServer /bridge/jobs response');
         }

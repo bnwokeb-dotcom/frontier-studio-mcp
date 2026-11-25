@@ -299,7 +299,15 @@ export class MusicBridgeRunner {
               'check WebBridgeServer /bridge/jobs payload requirements',
             );
           }
-          const parsed = JSON.parse(raw) as { job_id?: string; job?: { id?: string } };
+          let parsed: { job_id?: string; job?: { id?: string } };
+          try {
+            parsed = JSON.parse(raw) as { job_id?: string; job?: { id?: string } };
+          } catch {
+            throw errLaneDown(
+              `Music bridge returned invalid JSON on HTTP ${res.status}`,
+              'inspect WebBridgeServer /bridge/jobs response body',
+            );
+          }
           const jobId = parsed.job_id ?? parsed.job?.id;
           if (!jobId) {
             throw errLaneDown('Music bridge returned no job_id', 'inspect WebBridgeServer /bridge/jobs response');

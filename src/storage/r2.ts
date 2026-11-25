@@ -3,7 +3,7 @@
 
 import { createHash, createHmac } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { errAuth, errLaneDown, errValidation } from '../errors.js';
+import { errAuth, errLaneDown, errNotFound, errValidation } from '../errors.js';
 
 export interface R2Config {
   accountId: string;
@@ -87,7 +87,22 @@ export async function uploadToR2(
     throw errValidation('r2Key is required', 'provide a non-empty R2 object key');
   }
 
-  const fileBytes = await readFile(localPath);
+  let fileBytes: Buffer;
+  try {
+    fileBytes = await readFile(localPath);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === 'ENOENT') {
+      throw errNotFound(
+        `local file not found for R2 upload: ${localPath}`,
+        'verify the artifact file exists on disk before calling uploadToR2',
+      );
+    }
+    throw errValidation(
+      `failed to read local file for R2 upload: ${(err as Error).message}`,
+      'pass a valid readable file path',
+    );
+  }
   const cleanContentType = contentType.trim() || 'application/octet-stream';
 
   const host = `${cfg.accountId}.r2.cloudflarestorage.com`;

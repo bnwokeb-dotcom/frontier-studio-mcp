@@ -174,4 +174,31 @@ describe('Cloudflare R2 Real AWS SigV4 Storage Adapter', () => {
       expect((err as Error).message).toContain('AccessDenied');
     }
   });
+
+  it('throws NOT_FOUND with NEXT: hint when localPath does not exist (ENOENT) and VALIDATION on unreadable directory', async () => {
+    process.env.R2_ACCOUNT_ID = 'acct1';
+    process.env.R2_ACCESS_KEY_ID = 'key1';
+    process.env.R2_SECRET_ACCESS_KEY = 'sec1';
+
+    const missingPath = join(root, 'nonexistent_clip.mp4');
+    try {
+      await uploadToR2(missingPath, 'films/f1/missing.mp4', 'video/mp4');
+      expect.fail('Expected uploadToR2 to throw NOT_FOUND on ENOENT');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StudioError);
+      expect((err as StudioError).code).toBe('NOT_FOUND');
+      expect((err as Error).message).toContain('NEXT:');
+      expect((err as Error).message).toContain(missingPath);
+    }
+
+    // Directory path (EISDIR) -> VALIDATION with NEXT:
+    try {
+      await uploadToR2(root, 'films/f1/dir.mp4', 'video/mp4');
+      expect.fail('Expected uploadToR2 to throw VALIDATION on directory');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StudioError);
+      expect((err as StudioError).code).toBe('VALIDATION');
+      expect((err as Error).message).toContain('NEXT:');
+    }
+  });
 });

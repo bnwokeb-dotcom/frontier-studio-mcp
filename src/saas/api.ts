@@ -2,7 +2,8 @@
 // Built using Node native HTTP for high performance and zero dependency overhead.
 
 import { execFile as execFileCb } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, rename, rm } from 'node:fs/promises';
 import http from 'node:http';
 import { join, resolve } from 'node:path';
@@ -41,6 +42,40 @@ function resolveDimensions(aspectRatio: string): { width: number; height: number
   }
 }
 
+const FONT_CANDIDATES = [
+  'C:/Windows/Fonts/arial.ttf',
+  'C:/Windows/Fonts/segoeui.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/System/Library/Fonts/Helvetica.ttc',
+];
+
+function findDrawtextFontOption(): string {
+  for (const candidate of FONT_CANDIDATES) {
+    if (existsSync(candidate)) {
+      const escaped = candidate.replace(/\\/g, '/').replace(/:/g, '\\:');
+      return `fontfile='${escaped}':`;
+    }
+  }
+  return '';
+}
+
+function derivePromptPalette(prompt: string): { bgHex: string; accentHex: string } {
+  const digest = createHash('sha256').update(prompt).digest();
+  const toHex = (n: number) => n.toString(16).padStart(2, '0');
+  const bgHex = `${toHex(10 + (digest[0] % 34))}${toHex(16 + (digest[1] % 34))}${toHex(28 + (digest[2] % 44))}`;
+  const accentHex = `${toHex(70 + (digest[3] % 165))}${toHex(120 + (digest[4] % 120))}${toHex(180 + (digest[5] % 75))}`;
+  return { bgHex, accentHex };
+}
+
+function escapeDrawtextLiteral(text: string): string {
+  return text
+    .replace(/'/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,');
+}
+
 export function createDefaultViduxDispatcher(opts: ViduxApiServerOptions = {}): JobDispatcher {
   const outRoot = resolve(opts.outputDir ?? join(process.cwd(), 'renders', 'vidux'));
 
@@ -67,13 +102,31 @@ export function createDefaultViduxDispatcher(opts: ViduxApiServerOptions = {}): 
     }
 
     if (model.id === 'ffmpeg-compositor') {
+      if (
+        typeof req.duration_sec !== 'number' ||
+        !Number.isFinite(req.duration_sec) ||
+        req.duration_sec < 1 ||
+        req.duration_sec > model.max_duration_sec
+      ) {
+        throw errValidation(
+          `duration_sec ${String(req.duration_sec)} out of range for ${model.id} (1..${model.max_duration_sec}s)`,
+          `pass numeric duration_sec between 1 and ${model.max_duration_sec}`,
+        );
+      }
+
       await mkdir(outRoot, { recursive: true });
       const { width, height } = resolveDimensions(req.aspect_ratio);
-      const dur = Math.max(1, Math.min(60, req.duration_sec));
+      const dur = req.duration_sec;
       const outPath = join(outRoot, `${jobId}.mp4`);
       const tmpPath = join(outRoot, `.tmp_${randomBytes(4).toString('hex')}_${jobId}.mp4`);
 
-      try {
+      const promptRendered = req.prompt.replace(/\s+/g, ' ').trim().slice(0, 72);
+      const { bgHex, accentHex } = derivePromptPalette(promptRendered);
+      const baseFilter = `drawbox=x='mod(t*220,${width})':y=${Math.floor(height / 2) - 40}:w=180:h=80:color=#${accentHex}@0.9:t=fill`;
+      const fontOpt = findDrawtextFontOption();
+      const drawtextFilter = `drawtext=${fontOpt}expansion=none:text='${escapeDrawtextLiteral(promptRendered)}':fontcolor=white:fontsize=36:x=(w-text_w)/2:y=${Math.floor(height * 0.25)}`;
+
+      const runFfmpeg = async (vf: string) => {
         await execFileAsync(
           'ffmpeg',
           [
@@ -82,9 +135,11 @@ export function createDefaultViduxDispatcher(opts: ViduxApiServerOptions = {}): 
             '-f',
             'lavfi',
             '-i',
-            `color=c=#0f172a:size=${width}x${height}:rate=24:duration=${dur}`,
+            `color=c=#${bgHex}:size=${width}x${height}:rate=24:duration=${dur}`,
             '-vf',
-            `drawbox=x='mod(t*220,${width})':y=${Math.floor(height / 2) - 40}:w=180:h=80:color=#38bdf8@0.9:t=fill`,
+            vf,
+            '-metadata',
+            `title=${promptRendered}`,
             '-c:v',
             'libx264',
             '-pix_fmt',
@@ -94,6 +149,15 @@ export function createDefaultViduxDispatcher(opts: ViduxApiServerOptions = {}): 
           ],
           { maxBuffer: 32 * 1024 * 1024 },
         );
+      };
+
+      try {
+        try {
+          await runFfmpeg(`${baseFilter},${drawtextFilter}`);
+        } catch {
+          // Safe fallback when fontconfig/libfreetype has no usable font in minimal containers
+          await runFfmpeg(baseFilter);
+        }
 
         const probe = await probeMedia(tmpPath);
         if (!probe.exists || probe.error || !probe.hasVideo || probe.width !== width || probe.height !== height || probe.durationS <= 0) {
@@ -107,6 +171,7 @@ export function createDefaultViduxDispatcher(opts: ViduxApiServerOptions = {}): 
         return {
           status: 'succeeded',
           output_path: outPath,
+          prompt_rendered: promptRendered,
         };
       } catch (err) {
         await rm(tmpPath, { force: true }).catch(() => {});
@@ -183,11 +248,19 @@ export function createViduxApiServer(engineOrOpts?: ViduxToolEngine | ViduxApiSe
       for await (const chunk of req) {
         body += chunk;
       }
-      try {
-        return body ? (JSON.parse(body) as Record<string, any>) : {};
-      } catch {
+      if (!body.trim()) {
         return {};
       }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        throw errValidation('invalid JSON request body', 'send valid application/json payload');
+      }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw errValidation('JSON request body must be an object', 'send a JSON object payload');
+      }
+      return parsed as Record<string, any>;
     };
 
     try {
@@ -246,9 +319,18 @@ export function createViduxApiServer(engineOrOpts?: ViduxToolEngine | ViduxApiSe
       // 6. Generate Job (Pre-flight Credit Reservation + Honest Dispatch)
       if (req.method === 'POST' && pathname === '/api/v1/generate') {
         const body = (await parseBody()) as Partial<GenerationRequest>;
-        if (!body.user_id || !body.niche_id || !body.model_id || !body.prompt) {
+        if (
+          typeof body.user_id !== 'string' ||
+          !body.user_id ||
+          typeof body.niche_id !== 'string' ||
+          !body.niche_id ||
+          typeof body.model_id !== 'string' ||
+          !body.model_id ||
+          typeof body.prompt !== 'string' ||
+          !body.prompt.trim()
+        ) {
           return sendJson(400, {
-            error: 'Missing required fields: user_id, niche_id, model_id, prompt, duration_sec'
+            error: 'Missing or invalid required fields: user_id, niche_id, model_id, prompt (non-empty string), duration_sec'
           });
         }
         const result = await vidux.createProject({

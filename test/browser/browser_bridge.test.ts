@@ -189,6 +189,32 @@ describe('Browser Automation Bridge', () => {
         await srv.stop();
       }
     });
+
+    it('throws LANE_DOWN cleanly when bridgeUrl returns invalid JSON on HTTP 200', async () => {
+      const outDir = join(root, 'music_bad_json');
+      const runner = new MusicBridgeRunner({
+        outputDir: outDir,
+        engine: 'udio',
+        bridgeUrl: 'http://127.0.0.1:9999',
+        fetchFn: (async () => ({
+          ok: true,
+          status: 200,
+          text: async () => '<html>not-json</html>',
+        })) as unknown as typeof fetch,
+      });
+
+      try {
+        await runner.generateAndExtractStems({
+          themeMelody: 'BadJsonTheme',
+          targetStates: ['felt_whisper'],
+        });
+        expect.fail('Expected MusicBridgeRunner to throw LANE_DOWN on invalid JSON');
+      } catch (err) {
+        expect(err).toBeInstanceOf(StudioError);
+        expect((err as StudioError).code).toBe('LANE_DOWN');
+        expect((err as Error).message).toContain('invalid JSON');
+      }
+    });
   });
 
   describe('CanvasBridge (Web Canvas Staging)', () => {
@@ -280,6 +306,31 @@ describe('Browser Automation Bridge', () => {
         expect(srv.getQueue().listJobs().length).toBe(2);
       } finally {
         await srv.stop();
+      }
+    });
+
+    it('throws LANE_DOWN cleanly when CanvasBridge HTTP 200 returns invalid JSON', async () => {
+      const runner = new CanvasBridgeRunner({
+        fetchFn: (async () => ({
+          ok: true,
+          status: 200,
+          text: async () => 'not-valid-json',
+        })) as unknown as typeof fetch,
+      });
+      const graph = runner.buildCanvasNodeGraph({
+        filmTitle: 'BadJsonFilm',
+        characterNodes: [],
+        locationNode: { id: 'loc_1', platePath: 'plate.png' },
+        prompt: 'Test',
+      });
+
+      try {
+        await runner.dispatchToBridge(graph, 'http://127.0.0.1:9999', 'film_bad_json');
+        expect.fail('Expected CanvasBridgeRunner to throw LANE_DOWN on invalid JSON');
+      } catch (err) {
+        expect(err).toBeInstanceOf(StudioError);
+        expect((err as StudioError).code).toBe('LANE_DOWN');
+        expect((err as Error).message).toContain('invalid JSON');
       }
     });
   });

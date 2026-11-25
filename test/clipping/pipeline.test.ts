@@ -301,4 +301,70 @@ Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,DYNAMIC CROP TEST
     await expect(executeClipRender(corruptPlan)).rejects.toThrow(StudioError);
     await expect(stat(corruptPlan.export_spec.output_path)).rejects.toThrow();
   }, 25_000);
+
+  it('prevents crop x + cropW overflow on 720x1280 sources with empty reframeTrack and mixed-width keyframes', async () => {
+    // 1. Empty reframeTrack on 720x1280 (cropW = round(1280 * 9/16) = 720, so x MUST be 0, not 56!)
+    expect(buildDynamicCropXExpr([], 720, 0, 720)).toBe('0');
+
+    // 2. Mixed-width keyframes where kf[1].crop_width < targetCropWidth (300 < 720) on 1000px wide source
+    const mixedTrack: ReframeKeyframe[] = [
+      { time_s: 0, frame: 0, crop_x: 0.5, crop_y: 0.5, crop_width: 720, crop_height: 1280, easing: 'linear' },
+      { time_s: 1, frame: 24, crop_x: 1.0, crop_y: 0.5, crop_width: 300, crop_height: 1280, easing: 'linear' },
+    ];
+    const expr = buildDynamicCropXExpr(mixedTrack, 1000, 0, 720);
+    // For targetCropWidth=720 on width=1000, maxX is 1000 - 720 = 280 (never 1000 - 300 = 700)
+    expect(expr).toContain('140+(280-140)*(t-0)/(1-0)');
+    expect(expr).not.toContain('700');
+
+    // 3. Real FFmpeg render on 720x1280 fixture with empty [] track and mixed-width track
+    const verticalSrc = join(root, 'vertical_720x1280.mp4');
+    await execFile('ffmpeg', [
+      '-y',
+      '-f', 'lavfi', '-i', 'testsrc=size=720x1280:rate=24:duration=2',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-an',
+      verticalSrc,
+    ]);
+
+    const candidate: HighlightCandidate = {
+      clip_id: 'portrait_empty_track',
+      start_s: 0.0,
+      end_s: 1.5,
+      duration_s: 1.5,
+      viral_score: 88,
+      title_hook: 'PORTRAIT EMPTY TRACK',
+      reason: '720x1280 portrait source',
+      speech_density: 0.8,
+      audio_energy_db: -10,
+      words: [],
+    };
+    const source: VideoSourceMeta = {
+      source_id: 'src_720p_portrait',
+      local_path: verticalSrc,
+      duration_s: 2.0,
+      width: 720,
+      height: 1280,
+      fps: 24,
+    };
+
+    const emptyPlan = generateClipProductionPlan(candidate, source, [], join(root, 'out_720_empty'));
+    expect(emptyPlan.ffmpeg_pipeline_command).toContain("crop=w=720:h=1280:x='0':y=0");
+    const emptyRes = await executeClipRender(emptyPlan);
+    expect(emptyRes.width).toBe(1080);
+    expect(emptyRes.height).toBe(1920);
+
+    const mixedPortraitTrack: ReframeKeyframe[] = [
+      { time_s: 0.0, frame: 0, crop_x: 0.5, crop_y: 0.5, crop_width: 720, crop_height: 1280, easing: 'linear' },
+      { time_s: 1.0, frame: 24, crop_x: 1.0, crop_y: 0.5, crop_width: 300, crop_height: 1280, easing: 'linear' },
+    ];
+    const mixedPlan = generateClipProductionPlan(
+      { ...candidate, clip_id: 'portrait_mixed_track' },
+      source,
+      mixedPortraitTrack,
+      join(root, 'out_720_mixed'),
+    );
+    expect(mixedPlan.ffmpeg_pipeline_command).toContain("crop=w=720:h=1280:x='if(lt(t,1),0+(0-0)*(t-0)/(1-0),0)':y=0");
+    const mixedRes = await executeClipRender(mixedPlan);
+    expect(mixedRes.width).toBe(1080);
+    expect(mixedRes.height).toBe(1920);
+  }, 25_000);
 });

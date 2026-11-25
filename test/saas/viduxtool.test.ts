@@ -397,4 +397,94 @@ describe('VIDUXTOOL SaaS: REST API Server', () => {
     expect(walletData.wallet.credit_balance).toBe(464); // 500 - 36
     expect(walletData.wallet.reserved_credits).toBe(0);
   });
+
+  it('returns HTTP 400 on malformed JSON, non-string prompt, and sub-1s duration without reserving credits, and surfaces prompt_rendered on ffmpeg-compositor', async () => {
+    await startServer({ outputDir: root });
+
+    await fetch(`${baseUrl}/api/v1/users/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user_id: 'usr_validate', email: 'val@viduxtool.com', tier: 'free_starter' }),
+    });
+
+    // 1. Malformed JSON -> 400 (never swallowed as {})
+    const badJsonRes = await fetch(`${baseUrl}/api/v1/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{bad json',
+    });
+    expect(badJsonRes.status).toBe(400);
+
+    // 2. Non-string prompt (123) -> 400 (not 500 TypeError)
+    const numPromptRes = await fetch(`${baseUrl}/api/v1/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'usr_validate',
+        niche_id: 'kinetic_motion_graphics',
+        model_id: 'ffmpeg-compositor',
+        prompt: 123,
+        duration_sec: 2,
+      }),
+    });
+    expect(numPromptRes.status).toBe(400);
+
+    // Direct engine refusal for non-string prompt and sub-1s duration
+    const directEngine = new ViduxToolEngine({
+      dispatcher: async () => ({ status: 'succeeded', output_path: 'unused.mp4' }),
+    });
+    directEngine.ledger.registerUser('usr_direct', 'd@test.com', 'free_starter');
+    try {
+      await directEngine.createProject({
+        user_id: 'usr_direct',
+        niche_id: 'kinetic_motion_graphics',
+        model_id: 'ffmpeg-compositor',
+        prompt: { bad: true } as unknown as string,
+        duration_sec: 2,
+      });
+      expect.fail('Expected non-string prompt to throw StudioError');
+    } catch (err) {
+      expect(err).toBeInstanceOf(StudioError);
+      expect((err as StudioError).code).toBe('VALIDATION');
+    }
+
+    // 3. Sub-1s float duration (0.4s) -> 400 before reserving credits
+    const subSecRes = await fetch(`${baseUrl}/api/v1/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'usr_validate',
+        niche_id: 'kinetic_motion_graphics',
+        model_id: 'ffmpeg-compositor',
+        prompt: 'Sub-second should be refused',
+        duration_sec: 0.4,
+      }),
+    });
+    expect(subSecRes.status).toBe(400);
+
+    const walletAfterRejects = await (await fetch(`${baseUrl}/api/v1/users/usr_validate/wallet`)).json();
+    expect(walletAfterRejects.wallet.reserved_credits).toBe(0);
+
+    // 4. Valid 2s ffmpeg-compositor render matches duration and surfaces prompt_rendered
+    const okRes = await fetch(`${baseUrl}/api/v1/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: 'usr_validate',
+        niche_id: 'kinetic_motion_graphics',
+        model_id: 'ffmpeg-compositor',
+        prompt: 'Neon Skyline: 100% Kinetic!',
+        duration_sec: 2,
+        aspect_ratio: '9:16',
+      }),
+    });
+    expect(okRes.status).toBe(202);
+    const okData = await okRes.json();
+    expect(okData.job.status).toBe('succeeded');
+    expect(okData.job.prompt_rendered).toContain('Neon Skyline');
+    const probe = await probeMedia(okData.job.output_path);
+    expect(probe.exists).toBe(true);
+    expect(probe.durationS).toBeGreaterThanOrEqual(1.8);
+    expect(probe.durationS).toBeLessThanOrEqual(2.3);
+  }, 20_000);
 });

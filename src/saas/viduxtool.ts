@@ -337,6 +337,7 @@ export interface GenerationResponse {
   status: 'rendering' | 'succeeded' | 'failed';
   provider_job_id?: string;
   output_path?: string;
+  prompt_rendered?: string;
   aspect_ratio: string;
   created_at: string;
 }
@@ -345,6 +346,7 @@ export interface DispatchResult {
   status?: 'rendering' | 'succeeded';
   provider_job_id?: string;
   output_path?: string;
+  prompt_rendered?: string;
 }
 
 export type JobDispatcher = (
@@ -396,14 +398,19 @@ export class ViduxToolEngine {
       );
     }
 
-    if (!req.prompt || !req.prompt.trim()) {
-      throw errValidation('prompt is required', 'provide a non-empty prompt');
+    if (typeof req.prompt !== 'string' || !req.prompt.trim()) {
+      throw errValidation('prompt is required (non-empty string)', 'provide a non-empty string prompt');
     }
 
-    if (!Number.isFinite(req.duration_sec) || req.duration_sec <= 0 || req.duration_sec > model.max_duration_sec) {
+    if (
+      typeof req.duration_sec !== 'number' ||
+      !Number.isFinite(req.duration_sec) ||
+      req.duration_sec < 1 ||
+      req.duration_sec > model.max_duration_sec
+    ) {
       throw errValidation(
-        `duration_sec ${req.duration_sec} out of range for ${req.model_id} (1..${model.max_duration_sec}s)`,
-        `pass duration_sec between 1 and ${model.max_duration_sec}`,
+        `duration_sec ${String(req.duration_sec)} out of range for ${req.model_id} (1..${model.max_duration_sec}s)`,
+        `pass numeric duration_sec between 1 and ${model.max_duration_sec}`,
       );
     }
 
@@ -439,6 +446,7 @@ export class ViduxToolEngine {
       status,
       ...(dispatchRes.provider_job_id ? { provider_job_id: dispatchRes.provider_job_id } : {}),
       ...(dispatchRes.output_path ? { output_path: dispatchRes.output_path } : {}),
+      ...(dispatchRes.prompt_rendered ? { prompt_rendered: dispatchRes.prompt_rendered } : {}),
       aspect_ratio: ratio,
       created_at: new Date().toISOString()
     };

@@ -114,16 +114,18 @@ export function buildDynamicCropXExpr(
   reframeTrack: ReframeKeyframe[],
   sourceWidth: number,
   startOffsetS: number = 0,
+  targetCropWidth?: number,
 ): string {
   if (reframeTrack.length === 0) {
-    const defaultW = Math.min(608, sourceWidth);
+    const defaultW = Math.max(2, Math.min(targetCropWidth ?? Math.min(608, sourceWidth), sourceWidth));
     const maxX = Math.max(0, sourceWidth - defaultW);
     return String(Math.round(clamp(0.5 * sourceWidth - defaultW / 2, 0, maxX)));
   }
 
   const points = reframeTrack.map((kf) => {
-    const maxX = Math.max(0, sourceWidth - kf.crop_width);
-    const x = Math.round(clamp(kf.crop_x * sourceWidth - kf.crop_width / 2, 0, maxX));
+    const activeCropW = Math.max(2, Math.min(targetCropWidth ?? kf.crop_width, sourceWidth));
+    const maxX = Math.max(0, sourceWidth - activeCropW);
+    const x = Math.round(clamp(kf.crop_x * sourceWidth - activeCropW / 2, 0, maxX));
     const t = Number(Math.max(0, kf.time_s - startOffsetS).toFixed(3));
     return { t, x };
   });
@@ -274,7 +276,7 @@ export function generateClipProductionPlan(
   const cropW = Math.max(2, Math.min(kf0.crop_width, source.width));
   const cropH = Math.max(2, Math.min(kf0.crop_height || source.height, source.height));
   const offsetS = resolveClipOffsetS(reframeTrack, candidate.start_s);
-  const cropExpr = buildDynamicCropXExpr(reframeTrack, source.width, offsetS);
+  const cropExpr = buildDynamicCropXExpr(reframeTrack, source.width, offsetS, cropW);
 
   const ffmpegCmd = [
     `ffmpeg -y -ss ${candidate.start_s.toFixed(2)} -to ${candidate.end_s.toFixed(2)} -i "${normSrc}"`,
@@ -364,12 +366,8 @@ export async function executeClipRender(
   const cropW = Math.max(2, Math.min(kf0.crop_width, srcProbe.width));
   const cropH = Math.max(2, Math.min(kf0.crop_height || srcProbe.height, srcProbe.height));
 
-  const boundedTrack = plan.reframe_track.map((kf) => ({
-    ...kf,
-    crop_width: Math.max(2, Math.min(kf.crop_width, srcProbe.width)),
-  }));
-  const offsetS = resolveClipOffsetS(boundedTrack, plan.trim.start_s);
-  const cropExpr = buildDynamicCropXExpr(boundedTrack, srcProbe.width, offsetS);
+  const offsetS = resolveClipOffsetS(plan.reframe_track, plan.trim.start_s);
+  const cropExpr = buildDynamicCropXExpr(plan.reframe_track, srcProbe.width, offsetS, cropW);
 
   const videoChain = `[0:v]crop=w=${cropW}:h=${cropH}:x='${cropExpr}':y=0,scale=1080:1920:flags=lanczos,setsar=1${assFilter}[scaled]`;
   const filterComplex = srcProbe.hasAudio
