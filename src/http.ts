@@ -21,6 +21,10 @@ import type { VideoQuality } from './lanes/video.js';
 import { probeMedia } from './qa/critic.js';
 import { StudioError } from './errors.js';
 import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
+import { enrollCharacterVoice, validateShotTable } from './continuity/intelligence.js';
+import { fetchRemoteApiSfx, loadSfxCatalog, resolveSfxWavPath, searchSfxCatalog, VIRAL_SFX_PACK_MAP } from './sfx/sfx_engine.js';
+import { autoSpotClipSfx, calculateDynamicReframeTrack, computeDeadAirJumpCuts, executeClipRender, extractViralHookVariants, generateClipProductionPlan } from './clipping/pipeline.js';
+import { MODEL_CATALOG, NICHE_TOOLKITS } from './saas/viduxtool.js';
 
 const execFileAsync = promisify(execFileCb);
 
@@ -566,6 +570,166 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
         return;
       } catch (err: any) {
         res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 7b. Trending SFX Kit & API Routes ─────────────────────────────────────
+    if (req.method === 'GET' && pathname === '/api/sfx/search') {
+      try {
+        const q = parsedUrl.searchParams.get('q') ?? undefined;
+        const category = parsedUrl.searchParams.get('category') ?? undefined;
+        const preset = parsedUrl.searchParams.get('preset') ?? undefined;
+        const limit = Number(parsedUrl.searchParams.get('limit') || '24');
+        const catalog = await loadSfxCatalog();
+        const resSearch = await searchSfxCatalog({ query: q, category, viral_preset: preset, limit });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          categories: catalog.categories,
+          viral_presets: VIRAL_SFX_PACK_MAP,
+          total_matches: resSearch.total_matches,
+          results: resSearch.results,
+        }));
+        return;
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (req.method === 'GET' && pathname === '/api/sfx/wav') {
+      try {
+        const id = parsedUrl.searchParams.get('id') || '';
+        const resolved = await resolveSfxWavPath(id, root);
+        const st = await stat(resolved.filePath);
+        res.writeHead(200, {
+          'Content-Type': 'audio/wav',
+          'Content-Length': st.size,
+          'Accept-Ranges': 'bytes',
+        });
+        createReadStream(resolved.filePath).pipe(res);
+        return;
+      } catch (err: any) {
+        const code = err instanceof StudioError && err.code === 'NOT_FOUND' ? 404 : 500;
+        res.writeHead(code, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/sfx/fetch') {
+      try {
+        const body = await readBodyJson(req);
+        const result = await fetchRemoteApiSfx({
+          provider: body.provider === 'freesound' ? 'freesound' : 'elevenlabs',
+          queryOrPrompt: String(body.query || body.prompt || ''),
+          durationS: body.duration_s ? Number(body.duration_s) : undefined,
+          studioRoot: root,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(result));
+        return;
+      } catch (err: any) {
+        const status = err instanceof StudioError && err.code === 'VALIDATION' ? 400 : 502;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 7c. Continuity Paper-Render & Voice Enrollment APIs ───────────────────
+    if (req.method === 'POST' && pathname === '/api/continuity/validate-table') {
+      try {
+        const body = await readBodyJson(req);
+        const audit = await validateShotTable(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(audit));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/continuity/voice-enroll') {
+      try {
+        const body = await readBodyJson(req);
+        const resEnroll = await enrollCharacterVoice(studioPaths(root), body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(resEnroll));
+        return;
+      } catch (err: any) {
+        res.writeHead(err instanceof StudioError && err.code === 'NOT_FOUND' ? 404 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    // ── 7d. Clip Studio / VI APIs & Toolkit Discovery ─────────────────────────
+    if (req.method === 'GET' && pathname === '/api/toolkits') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        toolkits: Object.values(NICHE_TOOLKITS),
+        models: Object.values(MODEL_CATALOG),
+      }));
+      return;
+    }
+
+    if (req.method === 'POST' && (pathname === '/api/clipping/plan' || pathname === '/api/clipping/render')) {
+      try {
+        const body = await readBodyJson(req);
+        const clipId = String(body.clip_id || `clip_${Date.now()}`);
+        const startS = Number(body.start_s ?? 0);
+        const endS = Number(body.end_s ?? 15);
+        const words = Array.isArray(body.words) ? body.words : [];
+        const srcPath = String(body.source_path || '');
+        const srcW = Number(body.source_width ?? 1920);
+        const srcH = Number(body.source_height ?? 1080);
+
+        const reframe = calculateDynamicReframeTrack(body.face_coordinates || [], srcW, srcH);
+        const hooks = extractViralHookVariants(words, String(body.title_hook || 'CLIP THAT'));
+        const deadAir = computeDeadAirJumpCuts(words);
+        const candidate = {
+          clip_id: clipId,
+          start_s: startS,
+          end_s: endS,
+          duration_s: Number((endS - startS).toFixed(3)),
+          viral_score: 90,
+          title_hook: String(body.title_hook || 'CLIP THAT'),
+          reason: hooks[0]?.hook_text ?? 'viral highlight',
+          speech_density: 0.85,
+          audio_energy_db: -6,
+          words,
+        };
+        const outDir = join(root, 'clips');
+        const plan = generateClipProductionPlan(
+          candidate,
+          { source_id: clipId, local_path: srcPath, duration_s: endS, width: srcW, height: srcH, fps: 30 },
+          reframe,
+          outDir,
+        );
+
+        if (pathname === '/api/clipping/plan') {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ plan, hook_variants: hooks, dead_air: deadAir }));
+          return;
+        }
+
+        const sfxSpots = body.auto_sfx !== false ? await autoSpotClipSfx(candidate, root) : [];
+        const rendered = await executeClipRender(plan, {
+          burnCaptions: body.burn_captions !== false,
+          sfxSpots,
+          studioRoot: root,
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ rendered, sfx_spots: sfxSpots, artifact_url: `/artifacts/clips/${clipId}.mp4` }));
+        return;
+      } catch (err: any) {
+        const status = err instanceof StudioError && err.code === 'VALIDATION' ? 400 : 500;
+        res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
         return;
       }

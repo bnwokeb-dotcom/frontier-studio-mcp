@@ -11,6 +11,9 @@ import { registerStagingTools } from './tools/staging.js';
 import { registerStoryboardTools } from './tools/storyboard.js';
 import { registerEditorTools } from './tools/editor.js';
 import { registerFlowPromptTools } from './tools/flow_prompts.js';
+import { registerContinuityTools } from './tools/continuity.js';
+import { registerSfxTools } from './tools/sfx.js';
+import { registerClippingTools } from './tools/clipping.js';
 import { registerFilmmakerPrompts } from './prompts/filmmaker.js';
 import { startHttpServer } from './http.js';
 import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
@@ -25,6 +28,9 @@ export function buildServer(opts: { studioRoot: string }): McpServer {
   registerStoryboardTools(server, opts.studioRoot);
   registerEditorTools(server, opts.studioRoot);
   registerFlowPromptTools(server, opts.studioRoot);
+  registerContinuityTools(server, opts.studioRoot);
+  registerSfxTools(server, opts.studioRoot);
+  registerClippingTools(server, opts.studioRoot);
   registerFilmmakerPrompts(server);
   return server;
 }

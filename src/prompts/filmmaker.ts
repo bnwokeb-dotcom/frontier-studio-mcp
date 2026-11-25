@@ -223,4 +223,70 @@ SKIT ACTING & ENSEMBLE PRODUCTION PROTOCOL (NO STATIC DISPLAY MODE):
       };
     },
   );
+
+  // 6. Lumina Canvas & Seedance 2.5 Infinite Sequence Director
+  server.prompt(
+    'lumina_canvas_director',
+    'Directs BytePlus Lumina / Seedance 2.5 style sequences with @character/@location/@video/@audio transfer contracts, Director\'s Read, Shot Table Paper-Render, and Three-Tier Action Hierarchy.',
+    {
+      story_premise: z.string().describe('Core story premise, characters, and final outcome'),
+      sequence_id: z.string().default('seq01').describe('Target sequence identifier'),
+    },
+    async (args) => {
+      return {
+        description: 'Lumina Infinite Canvas & Seedance 2.5 Continuity Pipeline',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are operating the Lumina / Seedance 2.5 Infinite Canvas Pipeline inside Frontier Studio MCP.
+
+PREMISE: ${args.story_premise}
+SEQUENCE: ${args.sequence_id}
+
+MANDATORY EXECUTION PROTOCOL:
+1. DUAL-ANCHOR VOICE & VISUAL LOCK:
+   - Register every recurring cast member with \`asset_register\`, build 3-panel headless turnarounds via \`flow_prompt_sheet\` / \`character_sheet_build\`, and lock permanent 48kHz voice identity via \`character_voice_enroll\`.
+2. PAPER RENDER BEFORE GPU SPEND:
+   - Call \`sequence_state_plan\` with full 10-field narrative Director's Read + complete geometric Shot Table (\`floor_plan\`, \`camera_side\`, \`in_frame\`, \`eyeline\`, \`action\`, \`others_idle_business\`, \`light_lock\`, \`last_frame\`).
+3. @TAG TRANSFER CONTRACTS:
+   - Compile each clip with \`shot_prompt_compile\` preserving exact \`@char_id\` / \`@Video1\` / \`@Audio1\` tags and role-isolation contracts.
+4. OBSERVED CANON OVERRIDES & CHAIN CAP:
+   - After rendering each shot, call \`sequence_take_record\` with actual \`observed_end_state\`. Never chain more than 2-3 consecutive takes before canonical re-anchoring.`,
+            },
+          },
+        ],
+      };
+    },
+  );
+
+  // 7. Viral Clip Studio / VI Architect (20-Repo + Trending SFX Pack)
+  server.prompt(
+    'viral_clip_architect',
+    'Architects ultra-viral 9:16 Reels, TikToks, and Shorts from long-form VODs using A/B hook extraction, dead-air jump cuts, exponential 9:16 subject reframing, kinetic captions, and sync.at trending SFX.',
+    {
+      source_path: z.string().describe('Path or URL of the source video/VOD'),
+      topic_hook: z.string().describe('Target viral hook or headline banner'),
+    },
+    async (args) => {
+      return {
+        description: 'Clip Studio / VI Viral Short Production Protocol',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are the Lead Viral Clipper operating Clip Studio / VI on Source: "${args.source_path}" | Hook: "${args.topic_hook}".
+
+PIPELINE:
+1. Call \`sfx_search\` to browse matching transitions/impacts/risers/glitches in the 320-sound 48kHz SFX Kit (or \`sfx_fetch_api\` for custom ElevenLabs/Freesound SFX).
+2. Call \`clip_plan_viral\` to score highlight viability, compute A/B hook variants, strip dead-air pauses, and generate piecewise-interpolated 9:16 reframe keyframes.
+3. Call \`clip_render_viral\` with \`burn_captions: true\` and \`auto_sfx: true\` to render an ffprobe-verified 1080x1920 H.264 MP4 mastered to -14 LUFS.`,
+            },
+          },
+        ],
+      };
+    },
+  );
 }

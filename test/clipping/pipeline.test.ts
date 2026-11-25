@@ -11,6 +11,10 @@ import {
   generateClipProductionPlan,
   buildDynamicCropXExpr,
   executeClipRender,
+  extractViralHookVariants,
+  computeDeadAirJumpCuts,
+  generateKineticAssSubtitles,
+  autoSpotClipSfx,
   type HighlightCandidate,
   type VideoSourceMeta,
   type ReframeKeyframe,
@@ -367,4 +371,72 @@ Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,DYNAMIC CROP TEST
     expect(mixedRes.width).toBe(1080);
     expect(mixedRes.height).toBe(1920);
   }, 25_000);
+
+  it('extracts A/B viral hooks, trims dead-air pauses, spots synced SFX, and renders captioned + SFX-mixed 9:16 MP4', async () => {
+    const words = [
+      { word: 'This', start_s: 0.1, end_s: 0.3 },
+      { word: 'secret', start_s: 0.35, end_s: 0.65 },
+      { word: '$10k', start_s: 0.7, end_s: 1.0 },
+      { word: 'trick', start_s: 1.05, end_s: 1.35 },
+      // 0.8s dead air gap -> stripped by computeDeadAirJumpCuts
+      { word: 'works', start_s: 2.15, end_s: 2.4 },
+      { word: 'fast!', start_s: 2.45, end_s: 2.8 },
+    ];
+
+    const hooks = extractViralHookVariants(words, 'GTA VI CLIP HACK');
+    expect(hooks.length).toBe(3);
+    expect(hooks.some((h) => h.hook_text.includes('SECRET'))).toBe(true);
+
+    const cut = computeDeadAirJumpCuts(words, 0.45, 0.05);
+    expect(cut.keepSegments.length).toBe(2);
+    expect(cut.removedSeconds).toBeGreaterThan(0.5);
+    expect(cut.remappedWords.length).toBe(6);
+
+    const assText = generateKineticAssSubtitles(words, { titleHook: 'CLIP THAT' });
+    expect(assText).toContain('[V4+ Styles]');
+    expect(assText).toContain('CLIP THAT');
+    expect(assText).toContain('\\fscx122');
+
+    const srcVideo = join(root, 'source_16_9_audio.mp4');
+    await execFile('ffmpeg', [
+      '-y',
+      '-f', 'lavfi', '-i', 'testsrc=size=1280x720:rate=24:duration=3',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=3',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+      srcVideo,
+    ]);
+
+    const candidate: HighlightCandidate = {
+      clip_id: 'viral_full_test',
+      start_s: 0,
+      end_s: 2.9,
+      duration_s: 2.9,
+      viral_score: 94,
+      title_hook: 'CLIP THAT',
+      reason: 'secret $10k trick',
+      speech_density: 0.85,
+      audio_energy_db: -6,
+      words,
+    };
+    const reframe = calculateDynamicReframeTrack([], 1280, 720);
+    const plan = generateClipProductionPlan(
+      candidate,
+      { source_id: 's1', local_path: srcVideo, duration_s: 3, width: 1280, height: 720, fps: 24 },
+      reframe,
+      join(root, 'out_viral'),
+    );
+    const sfxSpots = await autoSpotClipSfx(candidate, root);
+    expect(sfxSpots.length).toBeGreaterThanOrEqual(2);
+
+    const rendered = await executeClipRender(plan, {
+      burnCaptions: true,
+      sfxSpots,
+      studioRoot: root,
+    });
+
+    expect(rendered.width).toBe(1080);
+    expect(rendered.height).toBe(1920);
+    expect(rendered.burnedCaptions).toBe(true);
+    expect(rendered.sfxSpotsMixed).toBe(sfxSpots.length);
+  }, 30_000);
 });

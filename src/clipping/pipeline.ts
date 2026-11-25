@@ -3,12 +3,13 @@
 
 import { execFile as execFileCb } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { errJobFailed, errValidation } from '../errors.js';
 import type { TimedWord } from '../motion/spring_compositor.js';
 import { probeMedia } from '../qa/critic.js';
+import { computeSfxPlacement, mixSfxOntoMedia, resolveSfxWavPath, type SfxSpot } from '../sfx/sfx_engine.js';
 
 const execFileAsync = promisify(execFileCb);
 
@@ -321,8 +322,8 @@ export function generateClipProductionPlan(
  */
 export async function executeClipRender(
   plan: ClipProductionPlan,
-  opts: { subtitleAssPath?: string } = {},
-): Promise<ClipRenderResult> {
+  opts: { subtitleAssPath?: string; burnCaptions?: boolean; sfxSpots?: SfxSpot[]; studioRoot?: string } = {},
+): Promise<ClipRenderResult & { burnedCaptions: boolean; sfxSpotsMixed: number }> {
   if (!Number.isFinite(plan.trim.start_s) || !Number.isFinite(plan.trim.end_s) || plan.trim.start_s < 0 || plan.trim.end_s <= plan.trim.start_s) {
     throw errValidation(
       `invalid clip trim range [${plan.trim.start_s}, ${plan.trim.end_s}]`,
@@ -338,24 +339,39 @@ export async function executeClipRender(
     );
   }
 
+  let autoAssPath: string | undefined;
+  let assPathToUse = opts.subtitleAssPath;
+  if (!assPathToUse && opts.burnCaptions && plan.captions.words.length > 0) {
+    const outDir = dirname(plan.export_spec.output_path);
+    await mkdir(outDir, { recursive: true });
+    autoAssPath = join(outDir, `.tmp_${randomBytes(4).toString('hex')}_${plan.clip_id}.ass`);
+    const assContent = generateKineticAssSubtitles(plan.captions.words, {
+      titleHook: plan.title,
+      highlightHex: plan.captions.highlight_color,
+      clipOffsetS: plan.trim.start_s,
+    });
+    await writeFile(autoAssPath, assContent, 'utf8');
+    assPathToUse = autoAssPath;
+  }
+
   let assFilter = '';
-  if (opts.subtitleAssPath) {
+  if (assPathToUse) {
     try {
-      const st = await stat(opts.subtitleAssPath);
+      const st = await stat(assPathToUse);
       if (!st.isFile() || st.size === 0) {
         throw errValidation(
-          `subtitle ASS file "${opts.subtitleAssPath}" is empty or not a regular file`,
+          `subtitle ASS file "${assPathToUse}" is empty or not a regular file`,
           'provide a valid non-empty .ass subtitle file',
         );
       }
     } catch (err) {
       if (err instanceof Error && err.name === 'StudioError') throw err;
       throw errValidation(
-        `subtitle ASS file "${opts.subtitleAssPath}" not found`,
+        `subtitle ASS file "${assPathToUse}" not found`,
         'generate or provide an existing .ass subtitle file',
       );
     }
-    assFilter = `,ass='${escapeFfmpegFilterPath(opts.subtitleAssPath)}'`;
+    assFilter = `,ass='${escapeFfmpegFilterPath(assPathToUse)}'`;
   }
 
   const kf0 = plan.reframe_track[0] ?? {
@@ -418,14 +434,37 @@ export async function executeClipRender(
       );
     }
 
-    await rename(tmpPath, outPath);
+    let sfxSpotsMixed = 0;
+    if (opts.sfxSpots && opts.sfxSpots.length > 0) {
+      const sfxMixedTmp = join(dirname(outPath), `.tmp_sfx_${randomBytes(4).toString('hex')}_${basename(outPath)}`);
+      try {
+        const mixed = await mixSfxOntoMedia({
+          inputMediaPath: tmpPath,
+          outputPath: sfxMixedTmp,
+          spots: opts.sfxSpots,
+          loudnormLufs: plan.audio_processing.normalize_lufs,
+        });
+        await rm(tmpPath, { force: true }).catch(() => {});
+        await rename(sfxMixedTmp, outPath);
+        sfxSpotsMixed = mixed.spotsMixed;
+      } catch (err) {
+        await rm(sfxMixedTmp, { force: true }).catch(() => {});
+        throw err;
+      }
+    } else {
+      await rename(tmpPath, outPath);
+    }
+
+    const finalProbe = await probeMedia(outPath);
     return {
       outputPath: outPath,
-      durationS: outProbe.durationS,
-      width: outProbe.width,
-      height: outProbe.height,
-      fileBytes: outProbe.fileBytes,
-      hasAudio: outProbe.hasAudio,
+      durationS: finalProbe.durationS || outProbe.durationS,
+      width: finalProbe.width || outProbe.width,
+      height: finalProbe.height || outProbe.height,
+      fileBytes: finalProbe.fileBytes || outProbe.fileBytes,
+      hasAudio: finalProbe.hasAudio,
+      burnedCaptions: Boolean(assPathToUse),
+      sfxSpotsMixed,
     };
   } catch (err) {
     await rm(tmpPath, { force: true }).catch(() => {});
@@ -435,5 +474,287 @@ export async function executeClipRender(
       `FFmpeg clip render failed: ${msg.slice(-500)}`,
       'verify ffmpeg is installed and clip source/filter parameters are valid',
     );
+  } finally {
+    if (autoAssPath) {
+      await rm(autoAssPath, { force: true }).catch(() => {});
+    }
   }
+}
+
+export interface HookVariant {
+  variant_id: string;
+  strategy: 'curiosity_gap' | 'numeric_proof' | 'climax_teaser';
+  hook_text: string;
+  teaser_start_s: number;
+  teaser_end_s: number;
+  viral_hook_score: number;
+}
+
+const HOOK_POWER_REGEX = /\b(secret|never|stop|insane|million|billion|warning|truth|glitch|hack|trick|impossible|crazy|watch)\b/i;
+
+/**
+ * Generates up to 3 A/B opening hook variants from word-level transcript energy & tension keywords.
+ */
+export function extractViralHookVariants(words: TimedWord[], fallbackTitle: string): HookVariant[] {
+  if (words.length === 0) {
+    return [
+      {
+        variant_id: 'hook_01_curiosity',
+        strategy: 'curiosity_gap',
+        hook_text: fallbackTitle.toUpperCase(),
+        teaser_start_s: 0,
+        teaser_end_s: 2.5,
+        viral_hook_score: 72,
+      },
+    ];
+  }
+
+  // Sliding window chunks of ~5-7 words to locate peak phrases
+  const windows: Array<{ text: string; start: number; end: number; score: number }> = [];
+  const winSize = Math.min(6, words.length);
+  for (let i = 0; i <= words.length - winSize; i++) {
+    const slice = words.slice(i, i + winSize);
+    const phrase = slice.map((w) => w.word).join(' ');
+    let score = 60;
+    if (HOOK_POWER_REGEX.test(phrase)) score += 20;
+    if (/\d+|[$%#!]|\?/.test(phrase)) score += 15;
+    if (slice[0].start_s < 4) score += 5;
+    windows.push({
+      text: phrase,
+      start: slice[0].start_s,
+      end: slice[slice.length - 1].end_s,
+      score: Math.min(99, score),
+    });
+  }
+
+  windows.sort((a, b) => b.score - a.score);
+  const top = windows[0] ?? { text: fallbackTitle, start: 0, end: 2.5, score: 75 };
+  const second = windows.find((w) => Math.abs(w.start - top.start) > 2.0) ?? top;
+
+  return [
+    {
+      variant_id: 'hook_01_curiosity',
+      strategy: 'curiosity_gap',
+      hook_text: fallbackTitle.toUpperCase(),
+      teaser_start_s: words[0].start_s,
+      teaser_end_s: Math.min(words[words.length - 1].end_s, words[0].start_s + 2.5),
+      viral_hook_score: top.score,
+    },
+    {
+      variant_id: 'hook_02_climax_teaser',
+      strategy: 'climax_teaser',
+      hook_text: top.text.toUpperCase(),
+      teaser_start_s: top.start,
+      teaser_end_s: top.end,
+      viral_hook_score: Math.min(99, top.score + 4),
+    },
+    {
+      variant_id: 'hook_03_numeric_proof',
+      strategy: 'numeric_proof',
+      hook_text: second.text.toUpperCase(),
+      teaser_start_s: second.start,
+      teaser_end_s: second.end,
+      viral_hook_score: second.score,
+    },
+  ];
+}
+
+/**
+ * Strips dead-air pauses exceeding maxPauseS while preserving tight speech rhythm
+ * and returning remapped word timestamps for zero-drift caption sync.
+ */
+export function computeDeadAirJumpCuts(
+  words: TimedWord[],
+  maxPauseS: number = 0.45,
+  padS: number = 0.06,
+): {
+  keepSegments: Array<{ start_s: number; end_s: number }>;
+  removedSeconds: number;
+  remappedWords: TimedWord[];
+} {
+  if (words.length === 0) {
+    return { keepSegments: [], removedSeconds: 0, remappedWords: [] };
+  }
+
+  const sorted = [...words].sort((a, b) => a.start_s - b.start_s);
+  const keepSegments: Array<{ start_s: number; end_s: number }> = [];
+  let curStart = Math.max(0, sorted[0].start_s - padS);
+  let curEnd = sorted[0].end_s + padS;
+  let removedSeconds = 0;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const w = sorted[i];
+    const gap = w.start_s - curEnd;
+    if (gap > maxPauseS) {
+      keepSegments.push({ start_s: Number(curStart.toFixed(3)), end_s: Number(curEnd.toFixed(3)) });
+      removedSeconds += Math.max(0, w.start_s - padS - curEnd);
+      curStart = Math.max(0, w.start_s - padS);
+      curEnd = w.end_s + padS;
+    } else {
+      curEnd = Math.max(curEnd, w.end_s + padS);
+    }
+  }
+  keepSegments.push({ start_s: Number(curStart.toFixed(3)), end_s: Number(curEnd.toFixed(3)) });
+
+  // Remap word timings onto contiguous timeline
+  const remappedWords: TimedWord[] = [];
+  let accumOffset = 0;
+  for (const seg of keepSegments) {
+    const segWords = sorted.filter((w) => w.start_s >= seg.start_s - 0.001 && w.end_s <= seg.end_s + 0.001);
+    for (const w of segWords) {
+      remappedWords.push({
+        word: w.word,
+        start_s: Number((accumOffset + (w.start_s - seg.start_s)).toFixed(3)),
+        end_s: Number((accumOffset + (w.end_s - seg.start_s)).toFixed(3)),
+      });
+    }
+    accumOffset += seg.end_s - seg.start_s;
+  }
+
+  return {
+    keepSegments,
+    removedSeconds: Number(removedSeconds.toFixed(3)),
+    remappedWords,
+  };
+}
+
+function toAssTimestamp(sec: number): string {
+  const safe = Math.max(0, sec);
+  const h = Math.floor(safe / 3600);
+  const m = Math.floor((safe % 3600) / 60);
+  const s = Math.floor(safe % 60);
+  const cs = Math.floor((safe - Math.floor(safe)) * 100);
+  return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function hexToAssBgr(hex: string): string {
+  const clean = hex.replace('#', '');
+  if (clean.length !== 6) return '&H0000DEFF';
+  const r = clean.slice(0, 2);
+  const g = clean.slice(2, 4);
+  const b = clean.slice(4, 6);
+  return `&H00${b}${g}${r}`.toUpperCase();
+}
+
+/**
+ * Generates an ASS v4+ script for 1080x1920 vertical Shorts/Reels/TikTok with
+ * safe-zone caption margins, 3-word punch phrasing, bouncy spring pop, and top hook card.
+ */
+export function generateKineticAssSubtitles(
+  words: TimedWord[],
+  opts: {
+    titleHook?: string;
+    highlightHex?: string;
+    clipOffsetS?: number;
+    wordsPerChunk?: number;
+  } = {},
+): string {
+  const highlightAss = hexToAssBgr(opts.highlightHex ?? '#FFDE00');
+  const offset = opts.clipOffsetS ?? 0;
+  const chunkSize = Math.max(1, Math.min(5, opts.wordsPerChunk ?? 3));
+
+  const lines: string[] = [
+    '[Script Info]',
+    'Title: Frontier Studio Kinetic Captions',
+    'ScriptType: v4.00+',
+    'PlayResX: 1080',
+    'PlayResY: 1920',
+    'WrapStyle: 2',
+    'ScaledBorderAndShadow: yes',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: Kinetic,Arial,74,&H00FFFFFF,${highlightAss},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,360,1`,
+    'Style: HookCard,Arial,62,&H00000000,&H00000000,&H0000DEFF,&H0000DEFF,-1,0,0,0,100,100,0,0,3,18,0,8,80,80,190,1',
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+
+  if (opts.titleHook?.trim()) {
+    lines.push(
+      `Dialogue: 1,0:00:00.00,0:00:02.60,HookCard,,0,0,0,,{\\fad(120,180)}${opts.titleHook.trim().toUpperCase()}`,
+    );
+  }
+
+  for (let i = 0; i < words.length; i += chunkSize) {
+    const chunk = words.slice(i, i + chunkSize);
+    for (let j = 0; j < chunk.length; j++) {
+      const activeWord = chunk[j];
+      const wStart = Math.max(0, activeWord.start_s - offset);
+      const wEnd = Math.max(wStart + 0.08, activeWord.end_s - offset);
+      const renderedChunk = chunk
+        .map((w, idx) =>
+          idx === j
+            ? `{\\c${highlightAss}\\fscx122\\fscy122\\t(0,85,\\fscx100\\fscy100)}${w.word.toUpperCase()}{\\c&H00FFFFFF&\\fscx100\\fscy100}`
+            : w.word.toUpperCase(),
+        )
+        .join(' ');
+      lines.push(`Dialogue: 0,${toAssTimestamp(wStart)},${toAssTimestamp(wEnd)},Kinetic,,0,0,0,,${renderedChunk}`);
+    }
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Automatically spots synced trending SFX cues (hook slam, emphasized keywords, transition whooshes)
+ * against spoken word intervals so dialogue stays 100% intelligible under -14 LUFS mastering.
+ */
+export async function autoSpotClipSfx(
+  candidate: HighlightCandidate,
+  studioRoot: string,
+): Promise<SfxSpot[]> {
+  const spots: SfxSpot[] = [];
+  const speechIntervals = candidate.words.map((w) => ({
+    start_s: Math.max(0, w.start_s - candidate.start_s),
+    end_s: Math.max(0, w.end_s - candidate.start_s),
+  }));
+
+  // 1. Opening Hook Slam / Riser
+  const opener = await resolveSfxWavPath('hook_slam', studioRoot);
+  spots.push(
+    computeSfxPlacement({
+      entry: opener.entry,
+      filePath: opener.filePath,
+      targetMomentS: 0.12,
+      speechIntervals,
+      reason: 'opening_hook_impact',
+    }),
+  );
+
+  // 2. Scan words for viral emphasis triggers (capped at 4 crisp accents)
+  let accents = 0;
+  for (const w of candidate.words) {
+    if (accents >= 4) break;
+    const relMoment = Number(Math.max(0.4, w.start_s - candidate.start_s).toFixed(3));
+    if (relMoment > candidate.duration_s - 0.3) continue;
+
+    let preset: string | null = null;
+    if (/\$|money|cash|profit|thousand|million|\d+k/i.test(w.word)) {
+      preset = 'cash_register';
+    } else if (/\d+%|\d+x|top|first|best/i.test(w.word)) {
+      preset = 'ding_highlight';
+    } else if (/warning|glitch|stop|error|wtf|broken/i.test(w.word)) {
+      preset = 'glitch_error';
+    } else if (HOOK_POWER_REGEX.test(w.word)) {
+      preset = 'caption_pop';
+    }
+
+    if (preset) {
+      const resolved = await resolveSfxWavPath(preset, studioRoot);
+      spots.push(
+        computeSfxPlacement({
+          entry: resolved.entry,
+          filePath: resolved.filePath,
+          targetMomentS: relMoment,
+          speechIntervals,
+          reason: `keyword_${preset}_${w.word}`,
+        }),
+      );
+      accents += 1;
+    }
+  }
+
+  return spots;
 }

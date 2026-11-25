@@ -199,7 +199,7 @@ describe('StudioHttpServer', () => {
     await client.connect(transport);
     try {
       const listed = await client.listTools();
-      expect(listed.tools.length).toBe(34);
+      expect(listed.tools.length).toBe(43);
       const created = await client.callTool({
         name: 'film_create',
         arguments: { film_id: 'film_sse', title: 'SSE Test', logline: 'Headless SSE roundtrip', budget_usd: 10 },
@@ -486,5 +486,62 @@ describe('StudioHttpServer', () => {
     expect(filmAfter2.spentUsd).toBeCloseTo(0, 6);
     const ledgerRaw2 = await readFile(paths.ledgerPath('film_poll_refund'), 'utf8');
     expect(ledgerRaw2.trim().split('\n')).toHaveLength(2);
+  });
+
+  it('serves SFX search/wav, continuity validate-table, and toolkits API endpoints', async () => {
+    const sfxRes = await fetch(`${baseUrl}/api/sfx/search?q=boom&limit=5`);
+    expect(sfxRes.status).toBe(200);
+    const sfxJson = await sfxRes.json() as {
+      results: Array<{ id: string }>;
+      viral_presets: Record<string, { sound_id: string }>;
+    };
+    expect(sfxJson.results.some((r) => r.id === 'boom-hit-medium')).toBe(true);
+    expect(sfxJson.viral_presets.vine_boom.sound_id).toBe('boom-drop-strong');
+
+    const wavRes = await fetch(`${baseUrl}/api/sfx/wav?id=boom-hit-medium`);
+    expect(wavRes.status).toBe(200);
+    expect(wavRes.headers.get('content-type')).toContain('audio/wav');
+    const wavBuf = Buffer.from(await wavRes.arrayBuffer());
+    expect(wavBuf.subarray(0, 4).toString('ascii')).toBe('RIFF');
+
+    const valRes = await fetch(`${baseUrl}/api/continuity/validate-table`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        floor_plan: 'Hall interior: oak doors north, hearth west, long timber table center.',
+        rows: [
+          {
+            shot_id: '01',
+            camera_side: 'south wall wide',
+            in_frame: '@char enters north door toward table',
+            eyeline: 'toward hearth',
+            action: '@char sets lantern down slowly on timber table.',
+            others_idle_business: 'sentry shifts boots near west wall',
+            light_lock: 'steady warm tungsten hearth from west',
+            last_frame: 'lantern resting beside @char hand',
+          },
+          {
+            shot_id: '02',
+            camera_side: 'south wall tight',
+            in_frame: '@char profile left',
+            eyeline: 'off-screen right toward sentry',
+            action: '@char speaks quietly without raising chin.',
+            others_idle_business: 'hearth sparks drift behind @char shoulder',
+            light_lock: 'steady warm tungsten hearth from west',
+            last_frame: '@char eyes fixed off-screen right',
+          },
+        ],
+      }),
+    });
+    expect(valRes.status).toBe(200);
+    const valJson = await valRes.json() as { passed: boolean; rowCount: number };
+    expect(valJson.passed).toBe(true);
+    expect(valJson.rowCount).toBe(2);
+
+    const tkRes = await fetch(`${baseUrl}/api/toolkits`);
+    expect(tkRes.status).toBe(200);
+    const tkJson = await tkRes.json() as { toolkits: unknown[]; models: unknown[] };
+    expect(tkJson.toolkits.length).toBeGreaterThanOrEqual(6);
+    expect(tkJson.models.length).toBeGreaterThan(0);
   });
 });
