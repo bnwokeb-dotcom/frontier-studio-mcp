@@ -5,15 +5,33 @@
 // fromWirePatch/toWire here own the mapping; clients can echo tool output back
 // into a patch verbatim. Unknown patch keys are refused loudly, never dropped.
 import { z } from 'zod';
+import { execFile as execFileCb } from 'node:child_process';
+import { access, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { studioPaths } from '../store/paths.js';
-import { filmCreate, filmShow, type FilmMeta } from '../store/film.js';
+import { loadConfig } from '../config.js';
+import { getSharedBridgeQueue } from '../bridge/web_bridge_server.js';
+import { studioPaths, type AssetKindDir } from '../store/paths.js';
+import { filmCreate, filmShow, patchFilmMeta, type FilmMeta } from '../store/film.js';
 import { initStudio, setActiveFilm, getActiveFilm } from '../store/studio.js';
 import { assetRegister, type BiologicalMarkers } from '../store/asset.js';
 import { shotCreate, shotUpdate, shotShow, type AudioBlock, type CameraBlock, type CinematicsBlock, type ShotRecord, type ShotRef } from '../store/shot.js';
 import { sequenceLockGeo } from '../store/sequence.js';
 import { StudioError, errValidation } from '../errors.js';
+
+const execFileAsync = promisify(execFileCb);
+
+async function existsReadable(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 // Error map (binding ruling): VALIDATION|NOT_FOUND → -32602 (InvalidParams);
 // AUTH|BUDGET|LANE_DOWN|JOB_FAILED → -32000 (implementation-defined server error).
@@ -414,4 +432,202 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
       await sequenceLockGeo(paths, filmId, a.sequence, a.geo_block);
       return out(`locked ${a.sequence}`);
     }));
+
+  server.tool(
+    'budget_set',
+    'Sets or updates the hard budget cap (budget_usd) on a film record so pre-flight spend limits stay accurate.',
+    {
+      film_id: z.string().optional(),
+      budget_usd: z.number(),
+    },
+    async (a) =>
+      guard(async () => {
+        if (!Number.isFinite(a.budget_usd) || a.budget_usd < 0) {
+          throw errValidation(
+            `invalid budget_usd "${a.budget_usd}"`,
+            'pass a non-negative dollar budget_usd (e.g. 25)',
+          );
+        }
+        const filmId = await filmIdOf(a.film_id);
+        const updated = await patchFilmMeta(paths, filmId, (m) => ({
+          ...m,
+          budgetUsd: Number(a.budget_usd.toFixed(4)),
+        }));
+        const spent = updated.spentUsd ?? 0;
+        const remaining = Math.max(0, Number(((updated.budgetUsd ?? 0) - spent).toFixed(4)));
+        return out({
+          film_id: updated.filmId,
+          budget_usd: updated.budgetUsd,
+          spent_usd: spent,
+          remaining_usd: remaining,
+        });
+      }),
+  );
+
+  server.tool(
+    'asset_list',
+    'Lists all registered characters, locations, props, and styles in the film with sheet/plate/voice-lock readiness flags.',
+    {
+      film_id: z.string().optional(),
+      kind: z.enum(['character', 'location', 'prop', 'style']).optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        const filmId = await filmIdOf(a.film_id);
+        await filmShow(paths, filmId);
+        const kinds: Array<{ kind: 'character' | 'location' | 'prop' | 'style'; dir: AssetKindDir }> = [
+          { kind: 'character', dir: 'characters' },
+          { kind: 'location', dir: 'locations' },
+          { kind: 'prop', dir: 'props' },
+          { kind: 'style', dir: 'styles' },
+        ];
+        const filtered = a.kind ? kinds.filter((k) => k.kind === a.kind) : kinds;
+        const assets: Array<Record<string, unknown>> = [];
+
+        for (const entry of filtered) {
+          const baseDir = join(paths.assetsDir(filmId), entry.dir);
+          let names: string[] = [];
+          try {
+            names = (await readdir(baseDir)).sort();
+          } catch {
+            continue;
+          }
+          for (const assetId of names) {
+            const dir = paths.assetDir(filmId, entry.dir, assetId);
+            if (!(await existsReadable(join(dir, 'descriptor.md')))) continue;
+            assets.push({
+              asset_id: assetId,
+              kind: entry.kind,
+              has_sheet: await existsReadable(join(dir, 'sheet.png')),
+              has_plate: await existsReadable(join(dir, 'plate.png')),
+              has_geo_block: await existsReadable(join(dir, 'geo_block.md')),
+              has_voice_sample: await existsReadable(join(dir, 'voice_sample.wav')),
+              has_voice_profile: await existsReadable(join(dir, 'voice_profile.json')),
+              asset_dir: dir,
+            });
+          }
+        }
+
+        return out({ film_id: filmId, count: assets.length, assets });
+      }),
+  );
+
+  server.tool(
+    'shot_list',
+    'Lists registered shots in the film (optionally filtered by sequence or status) with continuity chaining and latest QC verdict.',
+    {
+      film_id: z.string().optional(),
+      sequence: z.string().optional(),
+      status: z.enum(['draft', 'rendering', 'kept', 'rejected']).optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        const filmId = await filmIdOf(a.film_id);
+        await filmShow(paths, filmId);
+        let files: string[] = [];
+        try {
+          files = (await readdir(paths.shotsDir(filmId))).filter((f) => f.endsWith('.json')).sort();
+        } catch {
+          return out({ film_id: filmId, count: 0, shots: [] });
+        }
+
+        const shots: Array<Record<string, unknown>> = [];
+        for (const f of files) {
+          const s = await shotShow(paths, filmId, f.replace(/\.json$/, ''));
+          if (a.sequence && s.sequence !== a.sequence) continue;
+          if (a.status && s.status !== a.status) continue;
+          const takes = s.takes ?? [];
+          const latestTake = takes.length > 0 ? takes[takes.length - 1] : undefined;
+          shots.push({
+            id: s.id,
+            sequence: s.sequence,
+            status: s.status,
+            duration_s: s.durationS,
+            aspect_ratio: s.aspectRatio ?? '16:9',
+            continuity: s.continuity ?? 'cut',
+            chain_from_shot_id: s.chainFromShotId ?? null,
+            takes_count: takes.length,
+            latest_qc_verdict: latestTake?.verdict ?? null,
+          });
+        }
+        return out({ film_id: filmId, count: shots.length, shots });
+      }),
+  );
+
+  server.tool(
+    'studio_doctor',
+    'Runs a pre-flight production environment diagnostic checking FFmpeg/FFprobe, writable STUDIO_ROOT, active credentials, Chrome Bridge status, and active film health.',
+    {
+      film_id: z.string().optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        const cfg = loadConfig();
+        let ffmpegVersion: string | null = null;
+        let ffprobeVersion: string | null = null;
+        try {
+          const r = await execFileAsync('ffmpeg', ['-version']);
+          ffmpegVersion = (r.stdout || '').split(/\r?\n/)[0]?.trim() || 'available';
+        } catch {}
+        try {
+          const r = await execFileAsync('ffprobe', ['-version']);
+          ffprobeVersion = (r.stdout || '').split(/\r?\n/)[0]?.trim() || 'available';
+        } catch {}
+
+        let studioRootWritable = false;
+        try {
+          await initStudio(paths);
+          const probeFile = join(studioRoot, `.doctor_probe_${Date.now()}`);
+          await mkdir(studioRoot, { recursive: true });
+          await writeFile(probeFile, 'ok', 'utf8');
+          await rm(probeFile, { force: true });
+          studioRootWritable = true;
+        } catch {}
+
+        const bridgeStatus = getSharedBridgeQueue(studioRoot).getStatus();
+        let activeFilmSummary: Record<string, unknown> | null = null;
+        try {
+          const targetFilm = a.film_id ?? (await getActiveFilm(paths));
+          const meta = await filmShow(paths, targetFilm);
+          activeFilmSummary = {
+            film_id: meta.filmId,
+            title: meta.title,
+            budget_usd: meta.budgetUsd ?? null,
+            spent_usd: meta.spentUsd ?? 0,
+            sequences_locked: Object.values(meta.sequences).filter((s) => Boolean(s.geoLocked)).length,
+          };
+        } catch {}
+
+        const recommendations: string[] = [];
+        if (!ffmpegVersion || !ffprobeVersion) {
+          recommendations.push('Install ffmpeg and ffprobe onto PATH for audio normalization, rough cuts, and QC.');
+        }
+        if (!cfg.vultrApiKey) {
+          recommendations.push('Set VULTR_INFERENCE_API_KEY + STUDIO_LIVE=1 for live MiniMax H3 video generation (or use video_import with Flow/Lumina MP4s).');
+        }
+        if (!cfg.geminiApiKey && bridgeStatus.connectedClients === 0) {
+          recommendations.push('Either set GEMINI_API_KEY for API image/TTS calls OR connect the Chrome extension (extension/) for zero-API Google AI Pro captures.');
+        }
+
+        const ok = Boolean(ffmpegVersion && ffprobeVersion && studioRootWritable);
+        return out({
+          status: ok ? 'ready' : 'degraded',
+          studio_root: studioRoot,
+          studio_root_writable: studioRootWritable,
+          binaries: { ffmpeg: ffmpegVersion, ffprobe: ffprobeVersion },
+          lanes: {
+            studio_live: cfg.studioLive,
+            vultr_minimax_h3: Boolean(cfg.vultrApiKey),
+            gemini_api: Boolean(cfg.geminiApiKey),
+            elevenlabs_api: Boolean(cfg.elevenLabsApiKey),
+            freesound_api: Boolean(cfg.freesoundApiKey),
+            synclabs_api: Boolean(cfg.syncLabsApiKey),
+            r2_storage: cfg.r2Configured,
+          },
+          bridge: bridgeStatus,
+          active_film: activeFilmSummary,
+          recommendations,
+        });
+      }),
+  );
 }

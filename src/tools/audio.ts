@@ -14,6 +14,7 @@ import { appendLine } from '../store/fs.js';
 import { ensureBudget, recordSpend } from '../budget.js';
 import { errNotFound, errValidation } from '../errors.js';
 import { GoogleAudioLane, ElevenLabsAudioLane, type AudioLane } from '../lanes/audio.js';
+import { getSharedBridgeQueue } from '../bridge/web_bridge_server.js';
 import { probeMedia, type MediaProbeResult } from '../qa/critic.js';
 import { guard, out } from './registry.js';
 
@@ -833,6 +834,86 @@ export function registerAudioTools(server: McpServer, studioRoot: string): void 
           score_audio_path: scoreMasterPath,
           manifest_path: manifestPath,
           shots: shotArrangements,
+        });
+      }),
+  );
+
+  server.tool(
+    'music_bridge_dispatch',
+    'Compiles dramatic tension-state prompts (felt_whisper, creeping_dread, epic_swell, vacuum_silence) for Suno/Udio stems under audio/stems/, optionally queuing jobs to WebBridgeServer so score_arrange_dynamic can mix real WAV stems.',
+    {
+      film_id: z.string().optional(),
+      theme_melody: z.string(),
+      states: z
+        .array(z.enum(['felt_whisper', 'creeping_dread', 'epic_swell', 'vacuum_silence']))
+        .default(['felt_whisper', 'creeping_dread', 'epic_swell']),
+      instruments: z.array(z.string()).optional(),
+      bpm: z.number().optional(),
+      engine: z.enum(['suno', 'udio']).default('suno'),
+      dispatch_to_bridge: z.boolean().default(false),
+    },
+    async (a) =>
+      guard(async () => {
+        if (!a.theme_melody.trim()) {
+          throw errValidation('theme_melody is required', 'describe the recurring leitmotif melody and mood');
+        }
+        const filmId = await resolveFilmOrThrow(paths, a.film_id);
+        const stemsDir = join(paths.audioDir(filmId), 'stems');
+        await mkdir(stemsDir, { recursive: true });
+
+        const instrumentsStr = (a.instruments ?? []).join(', ');
+        const queue = getSharedBridgeQueue(studioRoot);
+        const specs = a.states.map((st) => {
+          let prompt = '';
+          let bpm = a.bpm ?? 70;
+          if (st === 'felt_whisper') {
+            bpm = a.bpm ?? 60;
+            prompt = `Haunting delicate theme based on "${a.theme_melody}". Intimate solo acoustic, ${instrumentsStr || 'felt piano and weeping cello'}, soft melancholic reverb.`;
+          } else if (st === 'creeping_dread') {
+            bpm = a.bpm ?? 70;
+            prompt = `Ominous suspenseful variation on "${a.theme_melody}". Dark analog synth drone, 35Hz sub-bass, ${instrumentsStr || 'dissonant strings'}, ticking tension.`;
+          } else if (st === 'epic_swell') {
+            bpm = a.bpm ?? 88;
+            prompt = `Massive orchestral crescendo on "${a.theme_melody}". Brass Braam, war drums, ${instrumentsStr || 'soaring choir and strings'}, trailer climax.`;
+          } else {
+            bpm = a.bpm ?? 50;
+            prompt = `Total vacuum of silence, isolated sub-harmonic heartbeat pulse on "${a.theme_melody}".`;
+          }
+
+          const bridgeJob = a.dispatch_to_bridge
+            ? queue.enqueue({
+                target: 'music_stem',
+                film_id: filmId,
+                asset_id: st,
+                prompt,
+                model_hint: a.engine,
+                metadata: { state: st, bpm },
+              })
+            : undefined;
+
+          return {
+            state: st,
+            suggested_bpm: bpm,
+            prompt,
+            expected_wav_path: join(stemsDir, `${st}.wav`),
+            ...(bridgeJob ? { bridge_job_id: bridgeJob.id } : {}),
+          };
+        });
+
+        const promptsManifestPath = join(stemsDir, 'music_bridge_prompts.json');
+        await writeFile(
+          promptsManifestPath,
+          JSON.stringify({ film_id: filmId, engine: a.engine, theme_melody: a.theme_melody, specs }, null, 2),
+          'utf8',
+        );
+
+        return out({
+          film_id: filmId,
+          engine: a.engine,
+          stems_dir: stemsDir,
+          prompts_manifest_path: promptsManifestPath,
+          specs,
+          next_step: `Generate or drop WAV stems in ${stemsDir}, then call score_arrange_dynamic(film_id="${filmId}", stems_dir="${stemsDir}", shots=[...]).`,
         });
       }),
   );

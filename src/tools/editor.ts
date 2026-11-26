@@ -7,12 +7,15 @@ import { pathToFileURL } from 'node:url';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { loadConfig } from '../config.js';
 import { studioPaths, type StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
+import { filmMetaOrThrow } from '../store/film.js';
 import { shotShow, type ShotRecord } from '../store/shot.js';
 import { readJobs, type VideoJobEntry } from '../store/jobs.js';
 import { probeMedia, type MediaProbeResult } from '../qa/critic.js';
-import { errNotFound, errValidation } from '../errors.js';
+import { uploadToR2 } from '../storage/r2.js';
+import { errAuth, errNotFound, errValidation } from '../errors.js';
 import { guard, out } from './registry.js';
 
 const execFileAsync = promisify(execFileCb);
@@ -991,20 +994,81 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         const ffmpegCommand = `ffmpeg -y -i "${videoPath.replace(/\\/g, '/')}" -i "${audioPath.replace(/\\/g, '/')}" -c:v copy -c:a aac -b:a 192k -shortest "${outputPath.replace(/\\/g, '/')}"`;
 
         let executed = false;
+        let neuralJobId: string | undefined;
         if (a.apply !== false) {
-          if (!resolvedVideo) {
+          if (engine === 'synclabs') {
+            const cfg = loadConfig();
+            if (!cfg.syncLabsApiKey) {
+              throw errAuth(
+                'missing SYNC_API_KEY for neural SyncLabs lip-sync',
+                'set SYNC_API_KEY in .env (and supply public media URLs), or pass engine: "ffmpeg_mux"',
+              );
+            }
+            if (!resolvedVideo) {
+              throw errValidation(`no rendered MP4 found for shot "${shot.id}"`, 'run render_shot and job_download first');
+            }
+            const vidUrl = cfg.r2Configured
+              ? (await uploadToR2(resolvedVideo, `lipsync/${filmId}/${shot.id}_video.mp4`, 'video/mp4')).url
+              : null;
+            const audUrl = cfg.r2Configured
+              ? (await uploadToR2(audioPath, `lipsync/${filmId}/${shot.id}_audio.wav`, 'audio/wav')).url
+              : null;
+            if (!vidUrl || !audUrl) {
+              throw errValidation(
+                'SyncLabs neural lip-sync requires R2 credentials so video & WAV stems have public HTTPS URLs',
+                'set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY (and optionally R2_PUBLIC_DOMAIN), or pass engine: "ffmpeg_mux"',
+              );
+            }
+            const syncRes = await fetch('https://api.sync.so/v2/generate', {
+              method: 'POST',
+              headers: {
+                'x-api-key': cfg.syncLabsApiKey,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                model: 'lipsync-2',
+                input: [
+                  { type: 'video', url: vidUrl },
+                  { type: 'audio', url: audUrl },
+                ],
+              }),
+            });
+            if (!syncRes.ok) {
+              throw errValidation(
+                `SyncLabs API error (${syncRes.status}): ${await syncRes.text()}`,
+                'verify SYNC_API_KEY quota or retry with engine: "ffmpeg_mux"',
+              );
+            }
+            const syncData = (await syncRes.json()) as { id?: string; outputUrl?: string };
+            neuralJobId = syncData.id;
+            executed = true;
+          } else if (engine === 'wav2lip') {
+            const wav2lipEndpoint = process.env.WAV2LIP_ENDPOINT?.trim();
+            if (!wav2lipEndpoint) {
+              throw errValidation(
+                'wav2lip worker endpoint is not configured (WAV2LIP_ENDPOINT)',
+                'set WAV2LIP_ENDPOINT to your GPU Wav2Lip service URL, or pass engine: "ffmpeg_mux"',
+              );
+            }
             throw errValidation(
-              `no rendered MP4 found for shot "${shot.id}"`,
-              'run render_shot and job_download first (or pass apply: false to preview the mux command)',
+              `wav2lip worker invocation for "${wav2lipEndpoint}" requires matching local multipart service contract`,
+              'use engine: "ffmpeg_mux" or "synclabs" with R2 + SYNC_API_KEY',
             );
+          } else {
+            if (!resolvedVideo) {
+              throw errValidation(
+                `no rendered MP4 found for shot "${shot.id}"`,
+                'run render_shot and job_download first (or pass apply: false to preview the mux command)',
+              );
+            }
+            await mkdir(dir, { recursive: true });
+            await execFfmpegToDest(
+              ['-y', '-i', resolvedVideo, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest'],
+              outputPath,
+              [resolvedVideo, audioPath],
+            );
+            executed = true;
           }
-          await mkdir(dir, { recursive: true });
-          await execFfmpegToDest(
-            ['-y', '-i', resolvedVideo, '-i', audioPath, '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest'],
-            outputPath,
-            [resolvedVideo, audioPath],
-          );
-          executed = true;
         }
 
         return out({
@@ -1013,7 +1077,8 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           audio_stem: audioPath,
           video_source: videoPath,
           synced_video: outputPath,
-          ffmpeg_command: ffmpegCommand,
+          ...(neuralJobId ? { synclabs_job_id: neuralJobId } : {}),
+          ffmpeg_command: engine === 'ffmpeg_mux' ? ffmpegCommand : undefined,
           executed,
         });
       }),
@@ -1170,6 +1235,66 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           recommendation: passed
             ? 'Approved: video passes temporal consistency and frame integrity checks.'
             : 'Rejected: video has glitches/freezes. Trigger localized inpaint re-roll or seed adjustment.',
+        });
+      }),
+  );
+
+  server.tool(
+    'film_publish',
+    'Uploads assembled masters, graded clips, or FCPXML/OTIO timelines from STUDIO_ROOT to Cloudflare R2 CDN via SigV4 PUT and returns shareable public URLs.',
+    {
+      film_id: z.string().optional(),
+      target: z.enum(['rough_cut', 'fcpxml', 'otio', 'edl', 'custom']).default('rough_cut'),
+      file_path: z.string().optional().describe('Required when target is "custom"'),
+      r2_key_prefix: z.string().optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        await initStudio(paths);
+        const filmId = a.film_id ?? (await getActiveFilm(paths));
+        await filmMetaOrThrow(paths, filmId);
+
+        let localPath: string;
+        let contentType = 'application/octet-stream';
+        let extName = 'bin';
+
+        if (a.target === 'rough_cut') {
+          localPath = join(paths.rendersDir(filmId), 'rough_cut.mp4');
+          contentType = 'video/mp4';
+          extName = 'mp4';
+        } else if (a.target === 'fcpxml') {
+          localPath = join(paths.filmDir(filmId), 'timelines', `${filmId}.fcpxml`);
+          contentType = 'application/xml';
+          extName = 'fcpxml';
+        } else if (a.target === 'otio') {
+          localPath = join(paths.filmDir(filmId), 'timelines', `${filmId}.otio`);
+          contentType = 'application/json';
+          extName = 'otio';
+        } else if (a.target === 'edl') {
+          localPath = join(paths.filmDir(filmId), 'timelines', `${filmId}.edl`);
+          contentType = 'text/plain; charset=utf-8';
+          extName = 'edl';
+        } else {
+          if (!a.file_path?.trim()) {
+            throw errValidation('file_path is required when target is "custom"', 'pass the path to the rendered artifact to upload');
+          }
+          localPath = a.file_path;
+          extName = basename(localPath).split('.').pop()?.toLowerCase() || 'bin';
+          if (extName === 'mp4') contentType = 'video/mp4';
+          else if (extName === 'png') contentType = 'image/png';
+          else if (extName === 'wav') contentType = 'audio/wav';
+        }
+
+        const prefix = (a.r2_key_prefix || `films/${filmId}`).replace(/^\/+|\/+$/g, '');
+        const key = `${prefix}/${a.target === 'custom' ? basename(localPath) : `${a.target}.${extName}`}`;
+        const uploaded = await uploadToR2(localPath, key, contentType);
+        return out({
+          film_id: filmId,
+          target: a.target,
+          local_path: localPath,
+          r2_key: uploaded.key,
+          public_url: uploaded.url,
+          size_bytes: uploaded.sizeBytes,
         });
       }),
   );

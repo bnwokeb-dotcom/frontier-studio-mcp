@@ -7,7 +7,7 @@ import { studioPaths } from '../store/paths.js';
 import { StudioError } from '../errors.js';
 import { ingestAndNormalizeAudio } from '../tools/audio.js';
 
-export type BridgeJobTarget = 'flow_sheet' | 'flow_plate' | 'aistudio_voice';
+export type BridgeJobTarget = 'flow_sheet' | 'flow_plate' | 'flow_staging' | 'flow_storyboard' | 'aistudio_voice' | 'music_stem';
 export type BridgeJobStatus = 'pending' | 'claimed' | 'completed' | 'failed';
 
 export interface BridgeJobInput {
@@ -79,7 +79,14 @@ export class BridgeRequestError extends Error {
   }
 }
 
-const VALID_TARGETS = new Set<BridgeJobTarget>(['flow_sheet', 'flow_plate', 'aistudio_voice']);
+const VALID_TARGETS = new Set<BridgeJobTarget>([
+  'flow_sheet',
+  'flow_plate',
+  'flow_staging',
+  'flow_storyboard',
+  'aistudio_voice',
+  'music_stem',
+]);
 const SAFE_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const MIN_PNG_BYTES = 10240; // 10 KB minimum prevents 1x1/dummy PNG placeholders
@@ -320,10 +327,16 @@ export class BridgeQueue {
     let shotId: string | undefined;
     let lineIndex: number | undefined;
 
-    if (input.target === 'flow_sheet' || input.target === 'flow_plate') {
+    if (input.target === 'flow_sheet' || input.target === 'flow_plate' || input.target === 'flow_staging' || input.target === 'flow_storyboard') {
       assetId = assertSafeId(input.asset_id, 'asset_id');
-    } else if (input.target === 'aistudio_voice') {
-      shotId = assertSafeId(input.shot_id, 'shot_id');
+    } else if (input.target === 'aistudio_voice' || input.target === 'music_stem') {
+      shotId = input.shot_id ? assertSafeId(input.shot_id, 'shot_id') : undefined;
+      if (input.target === 'aistudio_voice' && !shotId) {
+        throw new BridgeRequestError(400, 'shot_id is required for aistudio_voice');
+      }
+      if (input.target === 'music_stem' && input.asset_id) {
+        assetId = assertSafeId(input.asset_id, 'asset_id');
+      }
       lineIndex = input.line_index ?? 1;
       if (!Number.isInteger(lineIndex) || lineIndex < 1) {
         throw new BridgeRequestError(400, 'line_index must be a positive integer >= 1');
@@ -412,16 +425,23 @@ export class BridgeQueue {
     const bytes = decodeBase64Payload(payload.data_base64);
     const paths = studioPaths(this.studioRoot);
 
-    if (job.target === 'flow_sheet' || job.target === 'flow_plate') {
+    if (job.target === 'flow_sheet' || job.target === 'flow_plate' || job.target === 'flow_staging' || job.target === 'flow_storyboard') {
       const { width, height } = validateAndInspectPng(bytes);
-      const kindDir =
-        job.target === 'flow_sheet'
-          ? 'characters'
-          : job.metadata?.asset_kind === 'styles'
-            ? 'styles'
-            : 'locations';
-      const fileName = job.target === 'flow_sheet' ? 'sheet.png' : 'plate.png';
-      const destPath = join(paths.assetDir(job.film_id, kindDir, job.asset_id!), fileName);
+      let destPath: string;
+      if (job.target === 'flow_staging') {
+        destPath = join(paths.filmDir(job.film_id), 'generated', `staging_${job.asset_id ?? job.id}.png`);
+      } else if (job.target === 'flow_storyboard') {
+        destPath = join(paths.storyboardsDir(job.film_id), `${job.asset_id ?? 'sequence'}_storyboard_${job.id}.png`);
+      } else {
+        const kindDir =
+          job.target === 'flow_sheet'
+            ? 'characters'
+            : job.metadata?.asset_kind === 'styles'
+              ? 'styles'
+              : 'locations';
+        const fileName = job.target === 'flow_sheet' ? 'sheet.png' : 'plate.png';
+        destPath = join(paths.assetDir(job.film_id, kindDir, job.asset_id!), fileName);
+      }
       assertContainedPath(this.studioRoot, destPath);
 
       await writeFileAtomic(destPath, bytes);
@@ -439,7 +459,7 @@ export class BridgeQueue {
       return job;
     }
 
-    // aistudio_voice -> validate >= 1KB audio, FFmpeg normalize to 48kHz mono PCM WAV atomically
+    // aistudio_voice / music_stem -> validate >= 1KB audio, FFmpeg normalize to 48kHz mono PCM WAV atomically
     if (bytes.length < MIN_AUDIO_BYTES) {
       throw new BridgeRequestError(
         400,
@@ -448,8 +468,12 @@ export class BridgeQueue {
     }
 
     const lineIdx = job.line_index ?? 1;
-    const audioDir = paths.audioDir(job.film_id);
-    const destPath = paths.audioPath(job.film_id, `${job.shot_id}_line_${lineIdx}.wav`);
+    const isMusicStem = job.target === 'music_stem';
+    const audioDir = isMusicStem ? join(paths.audioDir(job.film_id), 'stems') : paths.audioDir(job.film_id);
+    const stemSlug = job.asset_id || job.shot_id || job.id;
+    const destPath = isMusicStem
+      ? join(audioDir, `${stemSlug}.wav`)
+      : paths.audioPath(job.film_id, `${job.shot_id}_line_${lineIdx}.wav`);
     assertContainedPath(this.studioRoot, destPath);
     await mkdir(audioDir, { recursive: true });
 

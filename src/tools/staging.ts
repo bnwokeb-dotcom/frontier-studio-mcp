@@ -10,6 +10,7 @@ import { readText, appendLine } from '../store/fs.js';
 import { ensureBudget, recordSpend } from '../budget.js';
 import { errNotFound, errValidation } from '../errors.js';
 import { GeminiLane } from '../lanes/gemini.js';
+import { getSharedBridgeQueue } from '../bridge/web_bridge_server.js';
 import { guard, out } from './registry.js';
 
 export function registerStagingTools(server: McpServer, studioRoot: string): void {
@@ -17,7 +18,7 @@ export function registerStagingTools(server: McpServer, studioRoot: string): voi
 
   server.tool(
     'staging_build',
-    'Composites two registered characters onto a location keyframe plate with strict spatial boundaries to prevent identity bleed before video generation.',
+    'Composites two registered characters onto a location keyframe plate with strict spatial boundaries to prevent identity bleed before video generation. Supports Gemini API, Chrome Extension Web Bridge (dispatch_to_bridge), or zero-API Flow prompt output.',
     {
       film_id: z.string().optional(),
       char_a_id: z.string(),
@@ -27,6 +28,8 @@ export function registerStagingTools(server: McpServer, studioRoot: string): voi
       staging_layout: z.enum(['a_left_b_right', 'b_left_a_right', 'a_foreground_b_background']),
       scene_action: z.string(),
       image_size: z.enum(['1K', '2K', '4K']).optional(),
+      dispatch_to_bridge: z.boolean().optional(),
+      mode: z.enum(['auto', 'gemini', 'bridge', 'prompt_only']).optional(),
     },
     async (a) =>
       guard(async () => {
@@ -75,11 +78,40 @@ export function registerStagingTools(server: McpServer, studioRoot: string): voi
 
         const cfg = loadConfig();
         const geminiKey = cfg.geminiApiKey;
-        if (!geminiKey) {
-          throw errValidation('missing GEMINI_API_KEY for staging plate generation', 'set GEMINI_API_KEY in .env');
+        const selectedMode = a.mode ?? (a.dispatch_to_bridge ? 'bridge' : 'auto');
+
+        if (selectedMode === 'gemini' && !geminiKey) {
+          throw errValidation('missing GEMINI_API_KEY for staging plate generation', 'set GEMINI_API_KEY in .env or use dispatch_to_bridge: true');
         }
 
-        const lane = new GeminiLane(geminiKey);
+        if (selectedMode === 'bridge' || selectedMode === 'prompt_only' || (!geminiKey && selectedMode === 'auto')) {
+          const queue = getSharedBridgeQueue(studioRoot);
+          const bridgeJob =
+            a.dispatch_to_bridge || selectedMode === 'bridge'
+              ? queue.enqueue({
+                  target: 'flow_staging',
+                  film_id: filmId,
+                  asset_id: `${a.char_a_id}_${a.char_b_id}`,
+                  prompt: stagingPrompt,
+                  model_hint: 'Nano Banana 2.5',
+                  aspect_ratio: '16:9',
+                  metadata: { char_a_id: a.char_a_id, char_b_id: a.char_b_id, location_id: a.location_id, layout: a.staging_layout },
+                })
+              : undefined;
+          return out({
+            mode: bridgeJob ? 'bridge_queued' : 'prompt_only',
+            char_a_id: a.char_a_id,
+            char_b_id: a.char_b_id,
+            location_id: a.location_id,
+            layout: a.staging_layout,
+            staging_prompt: stagingPrompt,
+            ...(bridgeJob ? { bridge_job_id: bridgeJob.id } : {}),
+            bridge_connected: queue.getStatus().connectedClients > 0,
+            manual_instructions: `Open https://flow.google (Nano Banana 2.5, 16:9, ${a.image_size ?? '2K'}), generate the two-shot plate using staging_prompt, and save or attach via asset_image.`,
+          });
+        }
+
+        const lane = new GeminiLane(geminiKey!);
         const req = {
           prompt: stagingPrompt,
           refImages: [],

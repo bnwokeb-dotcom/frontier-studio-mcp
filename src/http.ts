@@ -22,6 +22,7 @@ import { probeMedia } from './qa/critic.js';
 import { StudioError } from './errors.js';
 import { WebBridgeServer, getSharedBridgeQueue } from './bridge/web_bridge_server.js';
 import { enrollCharacterVoice, validateShotTable } from './continuity/intelligence.js';
+import { compileDirectorDeskScene } from './continuity/director_desk.js';
 import { fetchRemoteApiSfx, loadSfxCatalog, resolveSfxWavPath, searchSfxCatalog, VIRAL_SFX_PACK_MAP } from './sfx/sfx_engine.js';
 import { autoSpotClipSfx, calculateDynamicReframeTrack, computeDeadAirJumpCuts, executeClipRender, extractViralHookVariants, generateClipProductionPlan } from './clipping/pipeline.js';
 import { MODEL_CATALOG, NICHE_TOOLKITS } from './saas/viduxtool.js';
@@ -663,6 +664,20 @@ export function createHttpServer(opts: HttpServerOptions): StudioHttpServer {
         return;
       } catch (err: any) {
         res.writeHead(err instanceof StudioError && err.code === 'NOT_FOUND' ? 404 : 400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+        return;
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/director-desk/compile') {
+      try {
+        const body = await readBodyJson(req);
+        const compiled = compileDirectorDeskScene(body);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(compiled));
+        return;
+      } catch (err: any) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: err.message }));
         return;
       }

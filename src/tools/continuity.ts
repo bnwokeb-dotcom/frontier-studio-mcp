@@ -14,6 +14,7 @@ import {
   validateShotTable,
   type SequenceProjectState,
 } from '../continuity/intelligence.js';
+import { compileDirectorDeskScene } from '../continuity/director_desk.js';
 import { errNotFound, errValidation } from '../errors.js';
 import { filmMetaOrThrow } from '../store/film.js';
 import { studioPaths } from '../store/paths.js';
@@ -318,6 +319,93 @@ export function registerContinuityTools(server: McpServer, studioRoot: string): 
           clone_remote: a.clone_remote,
         });
         return out(res);
+      }),
+  );
+
+  server.tool(
+    'shot_table_validate',
+    'Runs Paper-Render continuity linting over a proposed Shot Table (floor plan, 7-cell completeness, Three-Tier Action Hierarchy, Direction Traps, and optional Director Read) BEFORE creating shots or spending GPU credits.',
+    {
+      floor_plan: z.string(),
+      rows: z.array(
+        z.object({
+          shot_id: z.string(),
+          camera_side: z.string(),
+          in_frame: z.string(),
+          eyeline: z.string(),
+          action: z.string(),
+          others_idle_business: z.string(),
+          light_lock: z.string(),
+          last_frame: z.string(),
+          speaker_id: z.string().optional(),
+        }),
+      ),
+      director_read: z
+        .discriminatedUnion('lane', [
+          z.object({
+            lane: z.literal('narrative'),
+            dramatic_function: z.string(),
+            turn: z.string(),
+            pov: z.string(),
+            power_shift: z.string(),
+            hidden_objective: z.string(),
+            obstacle_tactic: z.string(),
+            suppressed_behavior: z.string(),
+            non_transferable_detail: z.string(),
+            value_before: z.string(),
+            value_after: z.string(),
+          }),
+          z.object({
+            lane: z.literal('non_narrative'),
+            utility_intent: z.string(),
+            non_narrative_refusal: z.string(),
+          }),
+        ])
+        .optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        if (a.director_read) {
+          validateDirectorRead(a.director_read);
+        }
+        const audit = await validateShotTable({ floor_plan: a.floor_plan, rows: a.rows });
+        return out(audit);
+      }),
+  );
+
+  server.tool(
+    'director_desk_stage',
+    'Compiles 3D Director\'s Desk character marks and camera positions into a cardinal spatial geo_block draft and validates 180-degree Line-of-Action side preservation across every camera setup.',
+    {
+      location_summary: z.string().optional(),
+      roles: z.array(
+        z.object({
+          role_id: z.string(),
+          label: z.string().optional(),
+          x: z.number(),
+          y: z.number().optional(),
+          z: z.number(),
+          facing_deg: z.number().optional(),
+          action: z.string().optional(),
+        }),
+      ),
+      cameras: z.array(
+        z.object({
+          camera_id: z.string(),
+          lens_mm: z.number().optional(),
+          x: z.number(),
+          y: z.number().optional(),
+          z: z.number(),
+          target_role_id: z.string().optional(),
+          move: z.string().optional(),
+          motivated_axis_switch: z.boolean().optional(),
+        }),
+      ),
+    },
+    async (a) =>
+      guard(async () => {
+        const compiled = compileDirectorDeskScene(a);
+        return out(compiled);
       }),
   );
 }

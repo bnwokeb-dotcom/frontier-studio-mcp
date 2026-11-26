@@ -199,7 +199,7 @@ describe('StudioHttpServer', () => {
     await client.connect(transport);
     try {
       const listed = await client.listTools();
-      expect(listed.tools.length).toBe(43);
+      expect(listed.tools.length).toBe(52);
       const created = await client.callTool({
         name: 'film_create',
         arguments: { film_id: 'film_sse', title: 'SSE Test', logline: 'Headless SSE roundtrip', budget_usd: 10 },
@@ -543,5 +543,25 @@ describe('StudioHttpServer', () => {
     const tkJson = await tkRes.json() as { toolkits: unknown[]; models: unknown[] };
     expect(tkJson.toolkits.length).toBeGreaterThanOrEqual(6);
     expect(tkJson.models.length).toBeGreaterThan(0);
+
+    const ddRes = await fetch(`${baseUrl}/api/director-desk/compile`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        location_summary: 'Basalt foundry',
+        roles: [
+          { role_id: 'role_a', x: -2, z: 0 },
+          { role_id: 'role_b', x: 2, z: 0 },
+        ],
+        cameras: [
+          { camera_id: 'cam_1', lens_mm: 35, x: 0, z: 5, target_role_id: 'role_a' },
+          { camera_id: 'cam_2', lens_mm: 50, x: 1, z: 4, target_role_id: 'role_b' },
+        ],
+      }),
+    });
+    expect(ddRes.status).toBe(200);
+    const ddJson = await ddRes.json() as { passed_axis_check: boolean; geo_block_draft: string };
+    expect(ddJson.passed_axis_check).toBe(true);
+    expect(ddJson.geo_block_draft).toContain('Basalt foundry');
   });
 });

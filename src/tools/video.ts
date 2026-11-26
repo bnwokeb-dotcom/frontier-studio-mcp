@@ -38,7 +38,8 @@
 // submit plain POST /v1/videos child jobs with parent_job_id lineage. Wiring
 // edits requires a verified request shape first (docs or live probe).
 import { z } from 'zod';
-import { readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
@@ -53,7 +54,7 @@ import type { ShotRecord, ShotRef } from '../store/shot.js';
 import { sequenceGeo } from '../store/sequence.js';
 import { findAssetKindDir } from '../store/asset.js';
 import { appendLine, ensureDir, readText } from '../store/fs.js';
-import { readJobs, updateJob } from '../store/jobs.js';
+import { appendJob, readJobs, updateJob } from '../store/jobs.js';
 import type { VideoJobEntry } from '../store/jobs.js';
 import { errLaneDown, errNotFound, errValidation } from '../errors.js';
 import { recordSpend } from '../budget.js';
@@ -846,4 +847,118 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       parent_job_id: a.parent_job_id,
     });
   }));
+
+  server.tool(
+    'video_import',
+    'Ingests an externally rendered MP4/MOV take (e.g. from Google Flow Veo or BytePlus Lumina Seedance 2.5) into the film renders folder at $0 API cost, validates video streams via ffprobe, extracts tail_frame.png for continuity chaining, and runs automated QC scoring.',
+    {
+      film_id: z.string().optional(),
+      shot_id: z.string(),
+      source_video_path: z.string(),
+      source_platform: z.enum(['lumina_seedance', 'google_flow_veo', 'kling', 'local']).optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        if (!a.shot_id.trim()) throw errValidation('shot_id is required', 'pass the target shot_id');
+        if (!a.source_video_path.trim()) throw errValidation('source_video_path is required', 'pass an existing MP4/MOV file path');
+
+        await initStudio(paths);
+        const filmId = a.film_id ?? (await getActiveFilm(paths));
+        await filmMetaOrThrow(paths, filmId);
+        const shot = await shotShow(paths, filmId, a.shot_id);
+
+        const srcProbe = await probeMedia(a.source_video_path);
+        if (
+          !srcProbe.exists ||
+          !srcProbe.hasVideo ||
+          srcProbe.width <= 0 ||
+          srcProbe.height <= 0 ||
+          srcProbe.durationS <= 0.05 ||
+          (srcProbe.nbFrames > 0 && srcProbe.nbFrames < 2)
+        ) {
+          throw errValidation(
+            `source video failed ffprobe validation (${srcProbe.error ?? 'missing or corrupt video stream'}): ${a.source_video_path}`,
+            'supply a playable non-corrupt MP4/MOV file with valid video frames',
+          );
+        }
+
+        const jobId = `imp_${Date.now()}_${randomBytes(3).toString('hex')}`;
+        const jobDir = `${paths.filmDir(filmId)}/renders/${jobId}`;
+        const destPath = `${jobDir}/shot.mp4`;
+        const tailFramePath = `${jobDir}/tail_frame.png`;
+        await ensureDir(jobDir);
+        await copyFile(a.source_video_path, destPath);
+
+        try {
+          await execFileAsync('ffmpeg', ['-y', '-sseof', '-0.1', '-i', destPath, '-frames:v', '1', '-q:v', '2', tailFramePath]);
+        } catch {}
+
+        const { referenceSheetPath, referencePlatePath } = await resolveShotAuditRefs(paths, filmId, shot.refs ?? []);
+        const qc = await auditTake({
+          mp4Path: destPath,
+          shotId: shot.id,
+          expectedAction: shot.action ?? '',
+          referenceSheetPath,
+          referencePlatePath,
+          durationS: srcProbe.durationS || shot.durationS || 5,
+        });
+
+        const resolution = `${srcProbe.width}x${srcProbe.height}`;
+        const durationS = Number(srcProbe.durationS.toFixed(2));
+        const entry: VideoJobEntry = {
+          job_id: jobId,
+          shot_id: shot.id,
+          lane: 'external_import',
+          status: 'completed',
+          submitted_ts: new Date().toISOString(),
+          prompt_version: `import:${a.source_platform ?? 'local'}`,
+          artifact_path: destPath,
+          actual_cost_usd: 0,
+          width: srcProbe.width,
+          height: srcProbe.height,
+          has_audio: srcProbe.hasAudio,
+          fps: srcProbe.fps,
+          resolution,
+          duration_s: durationS,
+          qc_verdict: qc.verdict,
+          qc_score: qc.score,
+          qc_issues: qc.reasons,
+          note: `imported from ${a.source_platform ?? 'local'} ($0 API cost)`,
+        };
+        await appendJob(paths, filmId, entry);
+
+        await appendLine(
+          paths.ledgerPath(filmId),
+          JSON.stringify({
+            ts: new Date().toISOString(),
+            film_id: filmId,
+            tool: 'video_import',
+            lane: 'external_import',
+            shot_id: shot.id,
+            job_id: jobId,
+            cost_usd: 0,
+            verdict: qc.verdict,
+          }),
+        );
+
+        return out({
+          job_id: jobId,
+          shot_id: shot.id,
+          status: 'completed',
+          source_platform: a.source_platform ?? 'local',
+          artifact_path: destPath,
+          tail_frame_path: tailFramePath,
+          actual_cost_usd: 0,
+          width: srcProbe.width,
+          height: srcProbe.height,
+          fps: srcProbe.fps,
+          has_audio: srcProbe.hasAudio,
+          resolution,
+          duration_s: durationS,
+          qc_verdict: qc.verdict,
+          qc_score: qc.score,
+          qc_issues: qc.reasons,
+        });
+      }),
+  );
 }
