@@ -5,11 +5,18 @@ import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { studioPaths, type StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
 import { filmMetaOrThrow } from '../store/film.js';
-import { assetRefCheck, findAssetKindDir, type BiologicalMarkers } from '../store/asset.js';
+import {
+  assetRefCheck,
+  findAssetKindDir,
+  formatBiologicalMarkersClause,
+  readBiologicalMarkers,
+  type AnatomyProfile,
+} from '../store/asset.js';
 import { sequenceGeo } from '../store/sequence.js';
 import { shotShow, type CinematicsBlock } from '../store/shot.js';
 import { errNotFound, errValidation } from '../errors.js';
-import { characterSheetPrompt, keyframePrompt } from './prompts.js';
+import { assetTurnaroundPrompt, keyframePrompt } from './prompts.js';
+import { composeH3Prompt } from './h3prompt.js';
 import { guard, out } from './registry.js';
 import { BridgeRequestError, getSharedBridgeQueue, type BridgeJob, type BridgeJobInput } from '../bridge/web_bridge_server.js';
 
@@ -103,22 +110,6 @@ async function readOptionalFile(filePath: string): Promise<string | undefined> {
   }
 }
 
-async function readBioMarkerClause(assetDir: string): Promise<string | undefined> {
-  const raw = await readOptionalFile(`${assetDir}/biological_markers.json`);
-  if (!raw) return undefined;
-  try {
-    const bio = JSON.parse(raw) as BiologicalMarkers;
-    const parts: string[] = [];
-    if (bio.irisColorHex) parts.push(`exact iris color ${bio.irisColorHex}`);
-    if (bio.boneStructure) parts.push(`bone structure: ${bio.boneStructure}`);
-    if (bio.signatureMarks) parts.push(`distinctive facial markings: ${bio.signatureMarks}`);
-    if (bio.ethnicAncestry) parts.push(`ancestry: ${bio.ethnicAncestry}`);
-    return parts.length > 0 ? `Biological consistency markers: ${parts.join(', ')}.` : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * Formats dialogue into a Reddington-cadence AI Studio performance script with phonetic [pause]/[breath] cues.
  */
@@ -148,10 +139,11 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
 
   server.tool(
     'flow_prompt_sheet',
-    'Formulates a locked 3-panel headless character turnaround prompt for Google Flow (Nano Banana 2.5, 4K, #e8e8e8) from a registered character dossier, with optional Chrome bridge dispatch at zero API cost.',
+    'Formulates a locked 3-panel character or creature turnaround prompt for Google Flow (Nano Banana 2.5, 4K, #e8e8e8) from a registered character dossier, with optional Chrome bridge dispatch at zero API cost.',
     {
       film_id: z.string().optional(),
       character_id: z.string(),
+      anatomy_profile: z.enum(['humanoid', 'creature', 'hybrid']).optional(),
       dispatch_to_bridge: z.boolean().optional(),
     },
     async (a) =>
@@ -187,9 +179,11 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
           );
         }
 
-        const bioClause = await readBioMarkerClause(assetDir);
+        const bio = await readBiologicalMarkers(assetDir);
+        const bioClause = bio ? formatBiologicalMarkersClause(bio) : undefined;
         const fullDescriptor = bioClause ? `${descriptor} ${bioClause}` : descriptor;
-        const basePrompt = characterSheetPrompt(fullDescriptor);
+        const anatomyProfile: AnatomyProfile = a.anatomy_profile ?? bio?.anatomyProfile ?? 'humanoid';
+        const basePrompt = assetTurnaroundPrompt(fullDescriptor, anatomyProfile);
 
         const prompt = [
           basePrompt,
@@ -199,7 +193,9 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
         ].join('\n');
 
         const negativePrompt =
-          'second face on center figure, head on center torso, duplicate face, beauty retouch, plastic airbrushed skin, dramatic directional shadows, background scenery, unrequested props, text, watermarks, logos, cropped limbs, wardrobe drift';
+          anatomyProfile === 'creature'
+            ? 'glowing LED eyes, neon eyes, uniform glossy rubber slime, background crowd limbs, floating extra claws, background scenery, text, watermarks, logos, anatomy drift'
+            : 'second face on center figure, head on center torso, duplicate face, beauty retouch, plastic airbrushed skin, dramatic directional shadows, background scenery, unrequested props, text, watermarks, logos, cropped limbs, wardrobe drift';
 
         const queue = getSharedBridgeQueue(studioRoot);
         let job: BridgeJob | undefined;
@@ -521,6 +517,83 @@ export function registerFlowPromptTools(server: McpServer, studioRoot: string): 
           ...(job.sample_rate_hz !== undefined ? { sample_rate_hz: job.sample_rate_hz } : {}),
           ...(job.duration_s !== undefined ? { duration_s: job.duration_s } : {}),
           ...(job.error ? { error: job.error } : {}),
+        });
+      }),
+  );
+
+  server.tool(
+    'flow_prompt_video',
+    'Compiles a zero-API Veo/Flow video generation prompt from a registered shot (with sequence/location geo_block, stripped TTS dialogue tags, and sheet/plate attach paths) with optional flow_video Chrome bridge dispatch.',
+    {
+      film_id: z.string().optional(),
+      shot_id: z.string(),
+      model_hint: z.string().optional(),
+      dispatch_to_bridge: z.boolean().optional(),
+    },
+    async (a) =>
+      guard(async () => {
+        const shotId = assertSafeIdentifier(a.shot_id, 'shot_id');
+        const filmId = await resolveFilmOrThrow(paths, a.film_id);
+        const shot = await shotShow(paths, filmId, shotId);
+
+        const attachPaths: string[] = [];
+        const dialogue: Array<{ voiceRef: string; voiceDescriptor: string; line: string }> = [];
+        for (const ref of shot.refs ?? []) {
+          if (ref.role === 'character') {
+            attachPaths.push(paths.assetDir(filmId, 'characters', ref.assetId) + '/sheet.png');
+          } else if (ref.role === 'location') {
+            attachPaths.push(paths.assetDir(filmId, 'locations', ref.assetId) + '/plate.png');
+          }
+        }
+        for (const d of shot.audioBlock.dialogue ?? []) {
+          if (!d.voiceRef) continue;
+          const voice = (await readOptionalFile(`${paths.assetDir(filmId, 'characters', d.voiceRef)}/voice.md`)) ?? '';
+          dialogue.push({ voiceRef: d.voiceRef, voiceDescriptor: voice, line: d.line });
+        }
+
+        let geoBlock = await sequenceGeo(paths, filmId, shot.sequence);
+        if (!geoBlock) {
+          const loc = shot.refs.find((r) => r.role === 'location');
+          if (loc) {
+            geoBlock = await readOptionalFile(`${paths.assetDir(filmId, 'locations', loc.assetId)}/geo_block.md`);
+          }
+          geoBlock = geoBlock ?? shot.geoBlock;
+        }
+
+        const prompt = composeH3Prompt({
+          action: shot.action ?? '',
+          camera: shot.camera,
+          cinematics: shot.cinematics,
+          geoBlock,
+          dialogue,
+          sfx: shot.audioBlock.sfx,
+          durationS: shot.durationS ?? 5,
+          platePresents: attachPaths.length > 0,
+        });
+
+        const queue = getSharedBridgeQueue(studioRoot);
+        let job: BridgeJob | undefined;
+        if (a.dispatch_to_bridge) {
+          job = enqueueBridgeJobOrThrow(studioRoot, {
+            target: 'flow_video',
+            film_id: filmId,
+            shot_id: shotId,
+            prompt,
+            model_hint: a.model_hint ?? 'Veo 3.1',
+            aspect_ratio: shot.aspectRatio ?? '16:9',
+            metadata: { duration_s: shot.durationS ?? 5, attach_paths: attachPaths },
+          });
+        }
+
+        return out({
+          film_id: filmId,
+          shot_id: shotId,
+          prompt,
+          duration_s: shot.durationS ?? 5,
+          aspect_ratio: shot.aspectRatio ?? '16:9',
+          attach_paths: attachPaths,
+          ...(job ? { bridge_job_id: job.id } : {}),
+          bridge_connected: queue.getStatus().connectedClients > 0,
         });
       }),
   );

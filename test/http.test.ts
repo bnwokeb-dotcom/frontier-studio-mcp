@@ -199,7 +199,7 @@ describe('StudioHttpServer', () => {
     await client.connect(transport);
     try {
       const listed = await client.listTools();
-      expect(listed.tools.length).toBe(52);
+      expect(listed.tools.length).toBe(53);
       const created = await client.callTool({
         name: 'film_create',
         arguments: { film_id: 'film_sse', title: 'SSE Test', logline: 'Headless SSE roundtrip', budget_usd: 10 },

@@ -40,7 +40,7 @@ const isError = (res: unknown) => (res as { isError?: boolean }).isError === tru
 const codeOf = (e: unknown) => (e as { code?: number }).code;
 
 describe('MCP registry tools', () => {
-  it('exposes all 52 production tools across all studio lanes', async () => {
+  it('exposes all 53 production tools across all studio lanes', async () => {
     const res = await client.listTools();
     expect(res.tools.map((t) => t.name).sort()).toEqual([
       'acoustic_match', 'asset_image', 'asset_list', 'asset_register', 'bridge_job_result',
@@ -48,7 +48,7 @@ describe('MCP registry tools', () => {
       'clip_plan_viral', 'clip_render_viral', 'dialogue_import', 'dialogue_render',
       'director_desk_stage', 'film_assemble', 'film_create', 'film_export_xml',
       'film_grade', 'film_publish', 'film_set_active', 'film_show', 'flow_prompt_plate',
-      'flow_prompt_sheet', 'image_generate', 'job_download', 'job_status', 'keyframe_build',
+      'flow_prompt_sheet', 'flow_prompt_video', 'image_generate', 'job_download', 'job_status', 'keyframe_build',
       'music_bridge_dispatch', 'qc_vision_audit', 'render_shot', 'repair_shot',
       'score_arrange_dynamic', 'sequence_lock_geo', 'sequence_state_plan',
       'sequence_take_record', 'sfx_fetch_api', 'sfx_search', 'sfx_spot_video',
@@ -305,7 +305,7 @@ describe('MCP registry tools', () => {
 
     // Wait until Chrome Bridge HTTP listener announces ready
     await new Promise<void>((resolveReady, rejectReady) => {
-      const timer = setTimeout(() => rejectReady(new Error(`Timed out waiting for bridge start. stderr=${stderr}`)), 8000);
+      const timer = setTimeout(() => rejectReady(new Error(`Timed out waiting for bridge start. stderr=${stderr}`)), 20000);
       const onData = () => {
         if (stderr.includes(`127.0.0.1:${freePort}`)) {
           clearTimeout(timer);

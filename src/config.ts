@@ -3,6 +3,9 @@ import { errValidation } from './errors.js';
 export interface StudioConfig {
   studioRoot: string;
   geminiApiKey?: string;
+  googleApplicationCredentials?: string;
+  gcpProjectId?: string;
+  vertexLocation: string;
   vultrApiKey?: string;
   elevenLabsApiKey?: string;
   freesoundApiKey?: string;
@@ -31,6 +34,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   return {
     studioRoot,
     geminiApiKey: env.GEMINI_API_KEY || undefined,
+    googleApplicationCredentials: env.GOOGLE_APPLICATION_CREDENTIALS || undefined,
+    gcpProjectId: env.GCP_PROJECT_ID || undefined,
+    vertexLocation: env.VERTEX_LOCATION || 'us-central1',
     vultrApiKey: env.VULTR_INFERENCE_API_KEY || undefined,
     elevenLabsApiKey: env.ELEVENLABS_API_KEY || undefined,
     freesoundApiKey: env.FREESOUND_API_KEY || undefined,

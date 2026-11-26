@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { loadAuthorizedUserCreds, refreshAdcAccessToken, type AuthorizedUserCreds } from './adc.js';
 import type { StudioConfig } from '../config.js';
 import { errAuth, errLaneDown, errNotFound, errValidation } from '../errors.js';
 import type {
@@ -60,69 +60,48 @@ export class GeminiLane implements ImageLane {
     return new GeminiLane(cfg.geminiApiKey);
   }
 
+  /**
+   * Resolves a GeminiLane using explicit GEMINI_API_KEY first, falling back to
+   * GOOGLE_APPLICATION_CREDENTIALS (ADC) when present in config/environment.
+   */
+  static async fromConfigOrAdc(
+    cfg: StudioConfig,
+    fetchFn: FetchLike = fetch,
+    env: Record<string, string | undefined> = process.env,
+  ): Promise<GeminiLane> {
+    if (cfg.geminiApiKey) {
+      return new GeminiLane(cfg.geminiApiKey, fetchFn);
+    }
+    const adcPath = (cfg.googleApplicationCredentials ?? env.GOOGLE_APPLICATION_CREDENTIALS)?.trim();
+    if (adcPath) {
+      return GeminiLane.fromAdc(adcPath, fetchFn);
+    }
+    throw errAuth(
+      'GEMINI_API_KEY is not set',
+      'set GEMINI_API_KEY or GOOGLE_APPLICATION_CREDENTIALS in the environment, then retry',
+    );
+  }
+
   // ADC path (Google Cloud org policies that disallow API keys): read the
   // authorized_user credentials file gcloud writes, exchange the refresh token
   // for an access token, and send it as a Bearer header instead of an API key.
   // The access token is cached per lane instance until 60s before expiry.
   static async fromAdc(credentialsPath: string, fetchFn: FetchLike = fetch): Promise<GeminiLane> {
-    let creds: { type?: string; client_id?: string; client_secret?: string; refresh_token?: string };
-    try {
-      creds = JSON.parse(await readFile(credentialsPath, 'utf8'));
-    } catch {
-      throw errAuth(`ADC credentials not readable at ${credentialsPath}`,
-        'run gcloud auth application-default login, or set GOOGLE_APPLICATION_CREDENTIALS to the credentials file');
-    }
-    if (creds.type !== 'authorized_user' || !creds.refresh_token || !creds.client_id || !creds.client_secret) {
-      throw errAuth(`ADC credentials at ${credentialsPath} are not an authorized_user file`,
-        'run gcloud auth application-default login to create one');
-    }
-    const token = await GeminiLane.refreshAccessToken(creds, fetchFn);
+    const creds = await loadAuthorizedUserCreds(credentialsPath);
+    const token = await refreshAdcAccessToken(creds, fetchFn);
     const lane = new GeminiLane(token.access_token, fetchFn, true);
     lane.adcCreds = creds;
     lane.tokenExpiresAt = Date.now() + (token.expires_in - 60) * 1000;
     return lane;
   }
 
-  private adcCreds?: { client_id?: string; client_secret?: string; refresh_token?: string };
+  private adcCreds?: AuthorizedUserCreds;
   private tokenExpiresAt = 0;
-
-  private static async refreshAccessToken(
-    creds: { client_id?: string; client_secret?: string; refresh_token?: string },
-    fetchFn: FetchLike,
-  ): Promise<{ access_token: string; expires_in: number }> {
-    let res: Awaited<ReturnType<FetchLike>>;
-    try {
-      res = await fetchFn('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({
-          client_id: creds.client_id ?? '',
-          client_secret: creds.client_secret ?? '',
-          refresh_token: creds.refresh_token ?? '',
-          grant_type: 'refresh_token',
-        }).toString(),
-      });
-    } catch (e) {
-      throw errLaneDown(`token refresh unreachable (${(e as Error).message})`, 'check network, then retry');
-    }
-    const raw = await res.text().catch(() => '');
-    let json: { access_token?: string; expires_in?: number; error_description?: string };
-    try {
-      json = JSON.parse(raw);
-    } catch {
-      throw errLaneDown('token refresh returned an unreadable response', 'retry; if it persists, re-run gcloud auth application-default login');
-    }
-    if (!res.ok || !json.access_token) {
-      throw errAuth(`token refresh rejected: ${json.error_description ?? raw.slice(0, 200)}`,
-        're-run gcloud auth application-default login to refresh the consent');
-    }
-    return { access_token: json.access_token, expires_in: json.expires_in ?? 3600 };
-  }
 
   // ADC lane: reuse the cached token; re-exchange when within 60s of expiry.
   private async ensureCredential(): Promise<string> {
     if (this.bearer && this.adcCreds && Date.now() >= this.tokenExpiresAt) {
-      const token = await GeminiLane.refreshAccessToken(this.adcCreds, this.fetchFn);
+      const token = await refreshAdcAccessToken(this.adcCreds, this.fetchFn);
       this.credential = token.access_token;
       this.tokenExpiresAt = Date.now() + (token.expires_in - 60) * 1000;
     }

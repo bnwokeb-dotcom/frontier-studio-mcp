@@ -62,11 +62,20 @@ import { auditTake, probeMedia } from '../qa/critic.js';
 import { composeH3Prompt } from './h3prompt.js';
 import type { H3DialogueLine } from './h3prompt.js';
 import { VultrLane } from '../lanes/vultr.js';
+import { VertexVideoLane } from '../lanes/vertex_video.js';
 import { H3_REAL_LENGTHS } from '../lanes/video.js';
-import type { VideoQuality } from '../lanes/video.js';
+import type { VideoLane, VideoQuality } from '../lanes/video.js';
 import { guard, out } from './registry.js';
 import { runBilledVideoSubmit } from './billed.js';
 import { liveLaneConfig, readRefImage } from './image.js';
+
+async function resolveVideoLane(studioRoot: string, laneName: 'vultr' | 'vertex' = 'vultr'): Promise<VideoLane> {
+  const cfg = liveLaneConfig(studioRoot);
+  if (laneName === 'vertex') {
+    return VertexVideoLane.fromConfig(cfg);
+  }
+  return VultrLane.fromConfig(cfg);
+}
 
 // Composer layout version stamped on every jobs.json entry — the lifecycle
 // tools (Task 4) and any future composer revision disambiguate through it.
@@ -303,13 +312,17 @@ export async function submitShotRender(opts: {
   filmId: string;
   shot: ShotRecord;
   quality: VideoQuality;
-  firstFrame?: { data: Buffer; mimeType: string }; // repair extend — INSTEAD of the plate
+  firstFrame?: { data: Buffer; mimeType: string }; // repair extend OR staged plate override
+  lastFrame?: { data: Buffer; mimeType: string }; // first+last bridge (Vertex lane)
+  strictStaging?: boolean;
+  laneName?: 'vultr' | 'vertex';
   tool: string; // ledger tool name: 'render_shot' | 'repair_shot'
   parentJobId?: string; // repair lineage
   chainFromShotId?: string;
   aspectRatio?: string;
 }): Promise<{ jobId: string; estimateUsd: number; durationS: number }> {
   const { studioRoot, paths, filmId, shot, quality, tool } = opts;
+  const laneName = opts.laneName ?? 'vultr';
 
   // 1. the picture beat (schema v2; legacy pre-v2 records are refused, never
   //    guessed at — the H3 [Shot N] block renders it verbatim)
@@ -381,6 +394,12 @@ export async function submitShotRender(opts: {
   }
 
   if (!firstFrame) {
+    if (opts.strictStaging && (shot.refs ?? []).some((r) => r.role === 'character')) {
+      throw errValidation(
+        `shot "${shot.id}" references character assets without a staged composite first_frame_path or tail_frame chain (strict_staging refused raw empty location plate.png)`,
+        'stage characters onto the location via staging_build (or storyboard_build) and pass first_frame_path, or link chain_from_shot_id',
+      );
+    }
     const plate = await findPlate(paths, filmId, shot.refs);
     if (!plate) {
       throw errValidation(
@@ -389,6 +408,13 @@ export async function submitShotRender(opts: {
       );
     }
     firstFrame = { data: plate.data, mimeType: 'image/png' }; // plate.png is png by name law
+  }
+
+  if (opts.lastFrame && laneName !== 'vertex') {
+    throw errValidation(
+      'last_frame_path requires a multi-frame video lane (vultr minimax-h3 accepts firstFrame only)',
+      'pass lane: "vertex" for first+last frame bridging, or omit last_frame_path on vultr',
+    );
   }
 
   // 4. dialogue voices: every spoken line needs a registered CHARACTER —
@@ -447,14 +473,15 @@ export async function submitShotRender(opts: {
   });
 
   // 7. STUDIO_LIVE gate + lane (lazily, per call) — the gate fires before
-  //    the lane exists; a missing VULTR_INFERENCE_API_KEY → AUTH here.
-  const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+  //    the lane exists; missing credentials → AUTH here.
+  const lane = await resolveVideoLane(studioRoot, laneName);
   const req = {
     prompt,
     durationS: shot.durationS,
     aspectRatio: opts.aspectRatio ?? shot.aspectRatio ?? '16:9',
     quality,
     firstFrame,
+    ...(opts.lastFrame ? { lastFrame: opts.lastFrame } : {}),
   };
 
   // 8. the money law, ONE copy (billed.ts): estimate → ensureBudget →
@@ -465,6 +492,7 @@ export async function submitShotRender(opts: {
     filmId,
     shotId: shot.id,
     tool,
+    laneName,
     lane,
     request: req,
     promptVersion: H3_PROMPT_VERSION,
@@ -476,15 +504,17 @@ export async function submitShotRender(opts: {
 export function registerVideoTools(server: McpServer, studioRoot: string): void {
   const paths = studioPaths(studioRoot);
 
-  // The flagship: the shot's doctrine → one gated, budgeted, async H3 render.
-  // Identity travels THROUGH the plate (first_frame I2V); characters speak via
-  // their voice.md; money is quoted and hard-stopped BEFORE the submit.
+  // The flagship: the shot's doctrine → one gated, budgeted, async H3/Vertex render.
   server.tool('render_shot', {
     shot_id: z.string(),
     film_id: z.string().optional(),
     quality: z.enum(['turbo', 'standard', 'max', 'ultra', '2K', '4K']).optional(),
     aspect_ratio: z.enum(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']).optional(),
     chain_from_shot_id: z.string().optional(),
+    first_frame_path: z.string().optional(),
+    last_frame_path: z.string().optional(),
+    lane: z.enum(['vultr', 'vertex']).optional(),
+    strict_staging: z.boolean().optional(),
   }, async (a) => guard(async () => {
     // 1. args
     if (!a.shot_id.trim()) {
@@ -499,6 +529,13 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     // 3. shot exists
     const shot = await shotShow(paths, filmId, a.shot_id);
 
+    const firstFrame = a.first_frame_path?.trim()
+      ? await readRefImage(paths, studioRoot, filmId, a.first_frame_path)
+      : undefined;
+    const lastFrame = a.last_frame_path?.trim()
+      ? await readRefImage(paths, studioRoot, filmId, a.last_frame_path)
+      : undefined;
+
     // 4–8. the shared ladder (ONE copy — repair_shot reuses it verbatim)
     const sub = await submitShotRender({
       studioRoot,
@@ -507,6 +544,10 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       shot,
       quality: a.quality ?? ('standard' as const),
       tool: 'render_shot',
+      ...(firstFrame ? { firstFrame } : {}),
+      ...(lastFrame ? { lastFrame } : {}),
+      ...(a.lane ? { laneName: a.lane } : {}),
+      ...(a.strict_staging ? { strictStaging: true } : {}),
       chainFromShotId: a.chain_from_shot_id,
       aspectRatio: a.aspect_ratio,
     });
@@ -543,7 +584,10 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const entry = await jobEntryOrThrow(paths, filmId, a.job_id);
 
     // 3. STUDIO_LIVE gate + lane (lazily, per call) — the gate precedes any fetch
-    const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+    if (entry.lane === 'external_import') {
+      throw errValidation(`job "${entry.job_id}" is an external_import and is already completed`, 'use entry.artifact_path directly');
+    }
+    const lane = await resolveVideoLane(studioRoot, entry.lane === 'vertex' ? 'vertex' : 'vultr');
     const st = await lane.status({ jobId: entry.job_id });
 
     // 4. the refund law (reserve at submit → refund on failure): a dead job
@@ -614,7 +658,10 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     }
 
     // 4. STUDIO_LIVE gate + lane — poll FIRST: content exists only on completed
-    const lane = VultrLane.fromConfig(liveLaneConfig(studioRoot));
+    if (entry.lane === 'external_import') {
+      throw errValidation(`job "${entry.job_id}" is already an imported video artifact`, 'use entry.artifact_path directly');
+    }
+    const lane = await resolveVideoLane(studioRoot, entry.lane === 'vertex' ? 'vertex' : 'vultr');
     const st = await lane.status({ jobId: entry.job_id });
     if (st.status !== 'completed') {
       if (st.status === 'failed') {
@@ -802,7 +849,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
     const shot = await shotShow(paths, filmId, a.shot_id);
 
     // 4. the parent handle must exist — the lineage anchor
-    await jobEntryOrThrow(paths, filmId, a.parent_job_id);
+    const parentEntry = await jobEntryOrThrow(paths, filmId, a.parent_job_id);
 
     // 5. mode-specific first frame: extend takes the agent-supplied parent
     //    final-frame (path resolution + extension law, one copy in image.ts);
@@ -833,6 +880,7 @@ export function registerVideoTools(server: McpServer, studioRoot: string): void 
       shot,
       quality: 'standard', // v1 repair renders standard (render_shot's default)
       ...(firstFrame !== undefined ? { firstFrame } : {}),
+      ...(parentEntry.lane === 'vertex' ? { laneName: 'vertex' as const } : {}),
       tool: 'repair_shot',
       parentJobId: a.parent_job_id,
     });

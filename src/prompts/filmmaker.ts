@@ -311,8 +311,8 @@ PIPELINE:
 IRON LAWS:
 1. Build the 8-Vector Treaty World Operating System (Institution, Treaty, Enforcement, Biology, Resource, Jurisdiction, Leverage, Irreversible Price) + 3-Layer Reddington Objective Stack BEFORE drafting dialogue.
 2. Enforce BUT/THEREFORE causality across every beat; start Frame 0:00 directly on an impossible procedural action in crisp 5600K daylight/skylight (ZERO black-screen opens, ZERO cryptic 2-word titles, ZERO background crowds — strict 2-body cap).
-3. Lock each scene's Scene Turn Grid + explicit Prop Math Ledger (In -> Used -> Out), restrict lines to <= 18 words with weaponized [breath]/[pause] subtext, and cap each 3-5s cut to 1 physical action verb.
-4. Persist state via \`film_create\`, \`sequence_state_plan\`, \`director_desk_stage\`, and verify via \`shot_table_validate\` before rendering.`,
+3. Lock each scene's Scene Turn Grid + explicit Prop Math Ledger (In -> Used -> Out), restrict lines to <= 18 words with weaponized [breath]/[pause] subtext, and cap each 3-5s cut to 1 physical action verb. For creatures/non-humans, set biological_markers.anatomy_profile ("creature" | "hybrid") so sheets use orthographic elevations.
+4. Persist state via \`film_create\`, \`sequence_state_plan\`, \`director_desk_stage\`, stage character shots via \`staging_build\` / sliced \`storyboard_build\` panels, and pass \`first_frame_path\` with \`strict_staging: true\` to \`render_shot\` (or \`lane: "vertex"\` / \`flow_prompt_video\` for first+last bridge).`,
             },
           },
         ],

@@ -198,7 +198,7 @@
 
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
-    fileInput.accept = '.png,image/png';
+    fileInput.accept = job.target === 'flow_video' ? '.mp4,.mov,.webm,video/*' : '.png,image/png';
     fileInput.style.display = 'none';
     fileInput.onchange = async () => {
       const file = fileInput.files?.[0];
@@ -210,7 +210,7 @@
           type: 'COMPLETE_JOB',
           jobId: job.id,
           dataBase64: base64,
-          mimeType: file.type || 'image/png',
+          mimeType: file.type || (job.target === 'flow_video' ? 'video/mp4' : 'image/png'),
         });
         if (resp?.ok) {
           if (currentJob && currentJob.id === job.id) {
@@ -220,7 +220,7 @@
               activeObserver = null;
             }
           }
-          setStatusMessage(`Saved to studio: ${resp.result?.output_path || 'sheet/plate.png'}`);
+          setStatusMessage(`Saved to studio: ${resp.result?.output_path || (job.target === 'flow_video' ? 'shot.mp4' : 'sheet/plate.png')}`);
         } else {
           setStatusMessage(resp?.error || 'Upload rejected by bridge server', true);
         }
@@ -230,7 +230,7 @@
     };
 
     const uploadBtn = document.createElement('button');
-    uploadBtn.textContent = 'Upload PNG';
+    uploadBtn.textContent = job.target === 'flow_video' ? 'Upload MP4' : 'Upload PNG';
     uploadBtn.style.cssText = 'padding:6px 10px;background:#374151;color:#fff;border:1px solid #4b5563;border-radius:6px;cursor:pointer;';
     uploadBtn.onclick = () => fileInput.click();
 

@@ -26,7 +26,12 @@ Every Dark Mythological Procedural Thriller defines these 8 operational vectors 
 9. **`15:00–17:00` Recontextualizing Leverage:** Earlier planted prop/signature (`0:04` seal) snaps shut around the antagonist.
 10. **`17:00–18:00` Aftermath & Larger World:** Concrete proof of survival inside a bigger continent/season arc.
 
-## 3. Prop & Cast Continuity Math Ledger Template
+## 3. 90–120s Macro Re-Stakes & Serialized Universe Gate (Long-Form Retention Lock)
+- **90–120s Escalation Rule:** No scene runs past `120s` without shifting physical custody, exposing a forged seal, or tripping a biological/treaty countdown.
+- **False-Victory Trap (`~75%` mark):** Let the protagonist *appear* to satisfy the treaty cleanly—then trigger the enemy's petty juridical counter-clause that makes survival more expensive than defeat.
+- **Episodic Universe Ledger (`universeLinks`):** Every finished pilot logs `1` unresolved institutional debt, `1` surviving nonhuman witness, and `1` contraband sealed prop carried into Episode 02.
+
+## 4. Prop & Cast Continuity Math Ledger Template
 Track every numbered item across scenes before passing to `subtext-screenplay-writer`:
 
 | Scene / Shot Range | Cast Present (Exact IDs) | Key Props In -> Used / Destroyed -> Out | Location State |

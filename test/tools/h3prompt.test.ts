@@ -177,4 +177,13 @@ describe('composeH3Prompt (the doctrine-native H3 layout)', () => {
     }));
     expect(p).toContain('Cinematic Physics: Stock: kodak vision3 500t; Optics: anamorphic 2x oval bokeh; Lighting: key fill 4 to 1; Color temperature: daylight 5600k; Atmosphere: subtle volumetric haze.');
   });
+
+  it('strips TTS phonetic tags like [breath] and [pause: 800ms] from video dialogue lines', () => {
+    const p = composeH3Prompt(parts({
+      dialogue: [{ voiceRef: 'char_mara', voiceDescriptor: 'MARA', line: '[breath] Living marrow stays warm. [pause: 800ms] You stamped a corpse.' }],
+    }));
+    expect(p).toContain('<d>[English]Living marrow stays warm. You stamped a corpse.</d>');
+    expect(p).not.toContain('[pause: 800ms]');
+    expect(p).not.toContain('[breath]');
+  });
 });

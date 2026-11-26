@@ -325,19 +325,29 @@ export function registerRegistryTools(server: McpServer, studioRoot: string): vo
     voice_provider: z.enum(['google', 'elevenlabs']).optional(),
     parent_dna: z.string().optional(),
     biological_markers: z.object({
+      anatomy_profile: z.enum(['humanoid', 'creature', 'hybrid']).optional(),
       iris_color_hex: z.string().optional(),
       bone_structure: z.string().optional(),
       signature_marks: z.string().optional(),
       ethnic_ancestry: z.string().optional(),
+      locomotion_rig: z.string().optional(),
+      carapace_material: z.string().optional(),
+      cornea_spec: z.string().optional(),
+      collar_harness: z.string().optional(),
     }).optional(),
   }, async (a) => guard(async () => {
     const filmId = await filmIdOf(a.film_id);
     const biologicalMarkers: BiologicalMarkers | undefined = a.biological_markers
       ? {
+          ...(a.biological_markers.anatomy_profile !== undefined ? { anatomyProfile: a.biological_markers.anatomy_profile } : {}),
           ...(a.biological_markers.iris_color_hex !== undefined ? { irisColorHex: a.biological_markers.iris_color_hex } : {}),
           ...(a.biological_markers.bone_structure !== undefined ? { boneStructure: a.biological_markers.bone_structure } : {}),
           ...(a.biological_markers.signature_marks !== undefined ? { signatureMarks: a.biological_markers.signature_marks } : {}),
           ...(a.biological_markers.ethnic_ancestry !== undefined ? { ethnicAncestry: a.biological_markers.ethnic_ancestry } : {}),
+          ...(a.biological_markers.locomotion_rig !== undefined ? { locomotionRig: a.biological_markers.locomotion_rig } : {}),
+          ...(a.biological_markers.carapace_material !== undefined ? { carapaceMaterial: a.biological_markers.carapace_material } : {}),
+          ...(a.biological_markers.cornea_spec !== undefined ? { corneaSpec: a.biological_markers.cornea_spec } : {}),
+          ...(a.biological_markers.collar_harness !== undefined ? { collarHarness: a.biological_markers.collar_harness } : {}),
         }
       : undefined;
     const { assetDir } = await assetRegister(paths, filmId, {

@@ -5,6 +5,7 @@
 // wording below is BINDING (M2 plan): a test pins it verbatim, so any edit
 // here is a law change, never a silent refactor.
 import { errValidation } from '../errors.js';
+import type { AnatomyProfile } from '../store/asset.js';
 import type { CinematicsBlock } from '../store/shot.js';
 
 // The Hell Grind sheet law: three panels on ONE shared background so the
@@ -26,6 +27,44 @@ export function characterSheetPrompt(descriptor: string): string {
     `Subject, identical in all three panels: ${descriptor}`,
     'Clothing identical across panels. No props except what the descriptor states. No background scenery — the grey studio backdrop only. No text, no labels, no watermarks.',
   ].join('\n');
+}
+
+/**
+ * Orthographic 3-panel creature/non-human reference sheet avoiding humanoid shirt-collar assumptions,
+ * glowing LED eyes, and uniform rubber sheen.
+ */
+export function creatureSheetPrompt(
+  descriptor: string,
+  profile: Exclude<AnatomyProfile, 'humanoid'> = 'creature',
+): string {
+  if (!descriptor.trim()) {
+    throw errValidation(
+      'descriptor is required',
+      'register the asset with a full descriptor before building its sheet',
+    );
+  }
+  const panel1 =
+    profile === 'hybrid'
+      ? 'Panel 1 (left): tight close-up of head, jaw/muzzle transition, recessed wet sky-reflecting corneal eyes (zero LED glow), and gill/spiracle slits.'
+      : 'Panel 1 (left): tight anatomical close-up of creature head, mandible/skull plates, recessed wet black sky-reflecting cornea (zero LED glow), and lateral breathing spiracles.';
+  const panel2 =
+    'Panel 2 (center): full lateral/three-quarter orthographic biomechanics elevation showing skeletal posture, grounded limb/tendril contacts, localized joint sheen vs matte scarred plates, and integrated tribunal collar/harness riveted cleanly around anatomy.';
+  const panel3 =
+    'Panel 3 (right): dorsal/posterior full-body silhouette view preserving scale, dorsal ridges, and trailing anatomy identically.';
+  return [
+    'Creature orthographic reference sheet for photoreal live-action cinema. Three panels on ONE neutral pale studio grey background (#e8e8e8), even overcast diffused light, fine skin/chitin pore detail, zero glossy slime, zero fantasy concept glow.',
+    panel1,
+    panel2,
+    panel3,
+    `Subject, anatomically identical across all three panels: ${descriptor}`,
+    'Harness, scars, and surface textures identical across panels. Grey studio backdrop only. Clean 35mm digital capture, zero cross-hatching, no text, no watermarks.',
+  ].join('\n');
+}
+
+export function assetTurnaroundPrompt(descriptor: string, anatomyProfile: AnatomyProfile = 'humanoid'): string {
+  return anatomyProfile === 'humanoid'
+    ? characterSheetPrompt(descriptor)
+    : creatureSheetPrompt(descriptor, anatomyProfile);
 }
 
 // The keyframe light law: ONE motivated light source, one direction of shadows,

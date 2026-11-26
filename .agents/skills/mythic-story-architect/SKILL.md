@@ -30,7 +30,8 @@ digraph greenlight_gate {
 1. **Treaty World Operating System (`Institution · Treaty · Enforcement · Biology · Jurisdiction · Leverage · Irreversible Price`)** — see [treaty-os-and-pressure-map.md](references/treaty-os-and-pressure-map.md).
 2. **3-Layer Objective Stack:** `Apparent Objective` | `Actual Objective` | `Hidden Objective`.
 3. **5-Beat Cold Open (`0:00–0:30`):** Impossible procedural act (`0–3s`) -> operational tools (`3–8s`) -> expectation violation (`8–14s`) -> 1–2 weaponized lines (`14–21s`) -> irreversible institutional shift (`21–30s`).
-4. **18-Min Narrative Pressure Map + Continuity Math Table**, registered via `film_create` and `sequence_state_plan`.
+4. **90–120s Re-Stakes Cadence & Serialized Lore (`universeLinks`):** Long-form (`10–18m`) acts MUST escalate stakes every `90–120s` via physical/legal reversals (Midpoint Objective Flip at `~50%`, False Compliance Trap at `~75%`), recording surviving witnesses and unpaid debts in `film.json` (`universeLinks`) for sequel binge hooks.
+5. **18-Min Narrative Pressure Map + Continuity Math Table**, registered via `film_create` and `sequence_state_plan`.
 
 ## Red Flags — Stop & Re-Break If You Think This
 | Rationalization | Reality & Fix |

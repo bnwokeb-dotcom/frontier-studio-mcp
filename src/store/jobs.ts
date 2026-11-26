@@ -14,7 +14,7 @@ import type { StudioPaths } from './paths.js';
 export interface VideoJobEntry {
   job_id: string;
   shot_id: string;
-  lane: 'vultr' | 'external_import';
+  lane: 'vultr' | 'vertex' | 'external_import';
   parent_job_id?: string; // repair lineage (Task 4)
   status: 'pending' | 'in_progress' | 'completed' | 'failed' | 'cancelled' | 'expired';
   submitted_ts: string;

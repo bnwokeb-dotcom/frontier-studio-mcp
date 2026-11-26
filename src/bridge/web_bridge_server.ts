@@ -5,9 +5,10 @@ import { randomBytes } from 'node:crypto';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { studioPaths } from '../store/paths.js';
 import { StudioError } from '../errors.js';
+import { probeMedia } from '../qa/critic.js';
 import { ingestAndNormalizeAudio } from '../tools/audio.js';
 
-export type BridgeJobTarget = 'flow_sheet' | 'flow_plate' | 'flow_staging' | 'flow_storyboard' | 'aistudio_voice' | 'music_stem';
+export type BridgeJobTarget = 'flow_sheet' | 'flow_plate' | 'flow_staging' | 'flow_storyboard' | 'flow_video' | 'aistudio_voice' | 'music_stem';
 export type BridgeJobStatus = 'pending' | 'claimed' | 'completed' | 'failed';
 
 export interface BridgeJobInput {
@@ -84,6 +85,7 @@ const VALID_TARGETS = new Set<BridgeJobTarget>([
   'flow_plate',
   'flow_staging',
   'flow_storyboard',
+  'flow_video',
   'aistudio_voice',
   'music_stem',
 ]);
@@ -329,6 +331,9 @@ export class BridgeQueue {
 
     if (input.target === 'flow_sheet' || input.target === 'flow_plate' || input.target === 'flow_staging' || input.target === 'flow_storyboard') {
       assetId = assertSafeId(input.asset_id, 'asset_id');
+    } else if (input.target === 'flow_video') {
+      shotId = assertSafeId(input.shot_id, 'shot_id');
+      if (input.asset_id) assetId = assertSafeId(input.asset_id, 'asset_id');
     } else if (input.target === 'aistudio_voice' || input.target === 'music_stem') {
       shotId = input.shot_id ? assertSafeId(input.shot_id, 'shot_id') : undefined;
       if (input.target === 'aistudio_voice' && !shotId) {
@@ -457,6 +462,43 @@ export class BridgeQueue {
       job.completed_at = nowIso;
       job.updated_at = nowIso;
       return job;
+    }
+
+    if (job.target === 'flow_video') {
+      if (bytes.length < MIN_PNG_BYTES) {
+        throw new BridgeRequestError(400, `Invalid video payload: file too small (${bytes.length} bytes)`);
+      }
+      const renderDir = join(paths.filmDir(job.film_id), 'renders', job.id);
+      const destPath = join(renderDir, 'shot.mp4');
+      assertContainedPath(this.studioRoot, destPath);
+      await mkdir(renderDir, { recursive: true });
+      const tmpIn = join(renderDir, `.tmp_video_${randomBytes(4).toString('hex')}.mp4`);
+      try {
+        await writeFile(tmpIn, bytes);
+        const probe = await probeMedia(tmpIn);
+        if (!probe.exists || !probe.hasVideo || probe.width <= 0 || probe.height <= 0 || probe.durationS <= 0.05) {
+          throw new BridgeRequestError(
+            400,
+            `Invalid video payload: ffprobe check failed (${probe.error ?? 'corrupt or non-video stream'})`,
+          );
+        }
+        await rename(tmpIn, destPath);
+        const relArtifact = relative(this.studioRoot, destPath).replace(/\\/g, '/');
+        job.status = 'completed';
+        job.output_path = destPath;
+        job.artifact_url = `/artifacts/${relArtifact}`;
+        job.width = probe.width;
+        job.height = probe.height;
+        job.duration_s = Number(probe.durationS.toFixed(2));
+        job.byte_length = bytes.length;
+        job.error = undefined;
+        job.completed_at = nowIso;
+        job.updated_at = nowIso;
+        return job;
+      } catch (err) {
+        await rm(tmpIn, { force: true }).catch(() => {});
+        throw err;
+      }
     }
 
     // aistudio_voice / music_stem -> validate >= 1KB audio, FFmpeg normalize to 48kHz mono PCM WAV atomically

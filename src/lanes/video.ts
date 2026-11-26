@@ -53,8 +53,8 @@ export interface VideoArtifact {
 
 export interface VideoLane {
   readonly cameraVocabulary: 'named';
-  /** GET /v1/videos/models; absent → errLaneDown naming the check. */
-  verifyModel(): Promise<'minimax-h3'>;
+  /** GET /v1/videos/models or provider verify; absent → errLaneDown. */
+  verifyModel(): Promise<string>;
   /** VULTR_PRICING_PER_SECOND[req.quality] × durationS. */
   estimatePrice(req: VideoLaneRequest): number;
   /** POST /v1/videos (202 → id, status pending). */

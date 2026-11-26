@@ -11,11 +11,42 @@ const KIND_DIR: Record<AssetKind, AssetKindDir> = {
   character: 'characters', location: 'locations', prop: 'props', style: 'styles',
 };
 
+export type AnatomyProfile = 'humanoid' | 'creature' | 'hybrid';
+
 export interface BiologicalMarkers {
+  anatomyProfile?: AnatomyProfile;
   irisColorHex?: string;
   boneStructure?: string;
   signatureMarks?: string;
   ethnicAncestry?: string;
+  locomotionRig?: string;
+  carapaceMaterial?: string;
+  corneaSpec?: string;
+  collarHarness?: string;
+}
+
+/** Formats persisted biological/anatomical markers into a deterministic prompt clause. */
+export function formatBiologicalMarkersClause(bio: BiologicalMarkers): string | undefined {
+  const parts: string[] = [];
+  if (bio.irisColorHex) parts.push(`exact iris color ${bio.irisColorHex}`);
+  if (bio.boneStructure) parts.push(`bone structure: ${bio.boneStructure}`);
+  if (bio.signatureMarks) parts.push(`distinctive markings: ${bio.signatureMarks}`);
+  if (bio.ethnicAncestry) parts.push(`ancestry: ${bio.ethnicAncestry}`);
+  if (bio.locomotionRig) parts.push(`locomotion rig: ${bio.locomotionRig}`);
+  if (bio.carapaceMaterial) parts.push(`surface/carapace: ${bio.carapaceMaterial}`);
+  if (bio.corneaSpec) parts.push(`corneal eye spec: ${bio.corneaSpec}`);
+  if (bio.collarHarness) parts.push(`collar/harness integration: ${bio.collarHarness}`);
+  return parts.length > 0 ? `Biological consistency markers: ${parts.join(', ')}.` : undefined;
+}
+
+/** Reads biological_markers.json from an asset directory if present and valid. */
+export async function readBiologicalMarkers(assetDir: string): Promise<BiologicalMarkers | undefined> {
+  try {
+    const raw = await readText(`${assetDir}/biological_markers.json`);
+    return JSON.parse(raw) as BiologicalMarkers;
+  } catch {
+    return undefined;
+  }
 }
 
 export interface AssetInput {

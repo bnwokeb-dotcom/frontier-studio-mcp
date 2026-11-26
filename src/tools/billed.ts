@@ -127,12 +127,14 @@ export async function runBilledVideoSubmit(opts: {
   filmId: string;
   shotId: string;
   tool: string; // ledger tool name
+  laneName?: 'vultr' | 'vertex';
   lane: VideoLane;
   request: VideoLaneRequest;
   promptVersion: string; // stamped on the jobs.json entry
   parentJobId?: string; // repair lineage (Task 4)
 }): Promise<BilledVideoSubmitResult> {
   const { studioRoot, filmId, shotId, tool, lane, request, promptVersion, parentJobId } = opts;
+  const laneName = opts.laneName ?? 'vultr';
   const paths = studioPaths(studioRoot);
 
   // 1. the quote (estimate) — the only input to the budget hard stop
@@ -157,7 +159,7 @@ export async function runBilledVideoSubmit(opts: {
   await appendLine(paths.ledgerPath(filmId), JSON.stringify({
     ts: new Date().toISOString(),
     tool,
-    lane: 'vultr',
+    lane: laneName,
     film_id: filmId,
     cost_usd: estimate,
     verdict: 'pending',
@@ -171,7 +173,7 @@ export async function runBilledVideoSubmit(opts: {
   await appendJob(paths, filmId, {
     job_id: ref.jobId,
     shot_id: shotId,
-    lane: 'vultr',
+    lane: laneName,
     ...(parentJobId !== undefined ? { parent_job_id: parentJobId } : {}),
     status: 'pending',
     submitted_ts: new Date().toISOString(),

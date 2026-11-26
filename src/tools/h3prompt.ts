@@ -51,6 +51,21 @@ function motionOf(move: string): { amplitude: string; speed: string } {
   return { amplitude, speed };
 }
 
+/**
+ * Strips TTS-only bracketed cue tags ([pause: 800ms], [breath], [whisper], [sigh])
+ * before rendering video speech lines so models never vocalize or render raw brackets.
+ */
+const TTS_CUE_TAG_RE = /\[(?:pause(?:\s*:\s*[^\]]*)?|breath|sigh|whisper|beat)\]/i;
+
+export function sanitizeVideoDialogue(raw: string): string {
+  if (!TTS_CUE_TAG_RE.test(raw)) return raw;
+  return raw
+    .replace(/\[(?:pause(?:\s*:\s*[^\]]*)?|breath|sigh|whisper|beat)\]/gi, ' ')
+    .replace(/\s+([,.!?;:])/g, '$1')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 const H3_PROMPT_CAP = 8000; // lane-side prompt ceiling (spec §12.1)
 
 export function composeH3Prompt(parts: H3PromptParts): string {
@@ -79,7 +94,10 @@ export function composeH3Prompt(parts: H3PromptParts): string {
     }
   }
   parts.dialogue.forEach((d, i) => {
-    lines.push(`(S${i + 1}) — ${d.voiceDescriptor} says: <d>[English]${d.line}</d>`);
+    const cleanLine = sanitizeVideoDialogue(d.line);
+    if (cleanLine) {
+      lines.push(`(S${i + 1}) — ${d.voiceDescriptor} says: <d>[English]${cleanLine}</d>`);
+    }
   });
   if (parts.geoBlock) {
     lines.push(`Setting (spatial map, locked across every shot of this scene): ${parts.geoBlock}`);

@@ -2,7 +2,7 @@
 // BINDING wording. The exact-template assertion below is pinned on purpose:
 // editing the law text must break this test loudly, not drift silently.
 import { describe, it, expect } from 'vitest';
-import { characterSheetPrompt, keyframePrompt } from '../../src/tools/prompts.js';
+import { characterSheetPrompt, creatureSheetPrompt, assetTurnaroundPrompt, keyframePrompt } from '../../src/tools/prompts.js';
 import { StudioError } from '../../src/errors.js';
 
 const DESCRIPTOR = 'A weathered trawler captain, mid-50s, salt-grey beard, patched oilskin coat';
@@ -123,5 +123,17 @@ describe('keyframePrompt (the light law)', () => {
         expect((e as StudioError).message).toMatch(/NEXT: /);
       }
     }
+  });
+});
+
+describe('creatureSheetPrompt & assetTurnaroundPrompt', () => {
+  it('routes humanoid profile to HEADLESS collar sheet and creature profile to anatomical biomechanics elevation', () => {
+    const human = assetTurnaroundPrompt('Elder notary in grey wool coat', 'humanoid');
+    expect(human).toContain('HEADLESS — the neck ends cleanly at the collar line');
+
+    const creature = creatureSheetPrompt('Salt-encrusted abyssal warden with bronze collar');
+    expect(creature).toContain('Creature orthographic reference sheet');
+    expect(creature).toContain('recessed wet black sky-reflecting cornea (zero LED glow)');
+    expect(creature).not.toContain('HEADLESS — the neck ends cleanly at the collar line');
   });
 });

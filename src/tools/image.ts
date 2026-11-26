@@ -21,10 +21,15 @@ import { studioPaths } from '../store/paths.js';
 import type { StudioPaths } from '../store/paths.js';
 import { initStudio, getActiveFilm } from '../store/studio.js';
 import { ensureDir, readText, writeText } from '../store/fs.js';
-import { attachImage, findAssetKindDir } from '../store/asset.js';
+import {
+  attachImage,
+  findAssetKindDir,
+  formatBiologicalMarkersClause,
+  readBiologicalMarkers,
+} from '../store/asset.js';
 import { GeminiLane } from '../lanes/gemini.js';
 import { errNotFound, errValidation } from '../errors.js';
-import { characterSheetPrompt, keyframePrompt } from './prompts.js';
+import { assetTurnaroundPrompt, keyframePrompt } from './prompts.js';
 import { guard, out } from './registry.js';
 import { runBilledTake } from './billed.js';
 
@@ -165,7 +170,7 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
 
     // 4. STUDIO_LIVE gate + lane (lazily, per call) — the gate fires before the
     // lane exists, so STUDIO_LIVE=0 can never reach a billed call
-    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
+    const lane = await GeminiLane.fromConfigOrAdc(liveLaneConfig(studioRoot));
     const req = {
       prompt: a.prompt,
       refImages,
@@ -208,6 +213,7 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
   server.tool('character_sheet_build', {
     asset_id: z.string(),
     film_id: z.string().optional(),
+    anatomy_profile: z.enum(['humanoid', 'creature', 'hybrid']).optional(),
   }, async (a) => guard(async () => {
     // 1. validate args
     if (!a.asset_id.trim()) {
@@ -236,27 +242,19 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
     }
     const assetDir = paths.assetDir(filmId, kindDir, a.asset_id);
     let descriptor = await readText(`${assetDir}/descriptor.md`);
-    try {
-      const bioRaw = await readText(`${assetDir}/biological_markers.json`);
-      const bio = JSON.parse(bioRaw);
-      const parts: string[] = [];
-      if (bio.irisColorHex) parts.push(`exact iris color ${bio.irisColorHex}`);
-      if (bio.boneStructure) parts.push(`bone structure: ${bio.boneStructure}`);
-      if (bio.signatureMarks) parts.push(`distinctive facial markings: ${bio.signatureMarks}`);
-      if (bio.ethnicAncestry) parts.push(`ancestry: ${bio.ethnicAncestry}`);
-      if (parts.length > 0) {
-        descriptor += ` Biological consistency markers: ${parts.join(', ')}.`;
-      }
-    } catch {
-      // Character has no biological markers
+    const bio = await readBiologicalMarkers(assetDir);
+    if (bio) {
+      const bioClause = formatBiologicalMarkersClause(bio);
+      if (bioClause) descriptor += ` ${bioClause}`;
     }
 
-    // 4. compose the sheet law (pure; VALIDATION on a whitespace-only descriptor)
-    const prompt = characterSheetPrompt(descriptor);
+    // 4. compose the turnaround law (humanoid headless sheet OR creature orthographic elevation)
+    const anatomyProfile = a.anatomy_profile ?? bio?.anatomyProfile ?? 'humanoid';
+    const prompt = assetTurnaroundPrompt(descriptor, anatomyProfile);
 
     // 5. STUDIO_LIVE gate + lane (lazily, per call) — sheets are 1K, 16:9 by
     // law; the gate fires before the lane exists
-    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
+    const lane = await GeminiLane.fromConfigOrAdc(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
 
     // 6. the money law, ONE copy (billed.ts): price → ensureBudget → submit →
@@ -351,7 +349,7 @@ export function registerImageTools(server: McpServer, studioRoot: string): void 
 
     // 6. STUDIO_LIVE gate + lane (lazily, per call) — keyframes are 1K, 16:9 by
     // law; the gate fires before the lane exists
-    const lane = GeminiLane.fromConfig(liveLaneConfig(studioRoot));
+    const lane = await GeminiLane.fromConfigOrAdc(liveLaneConfig(studioRoot));
     const req = { prompt, refImages: [], aspectRatio: '16:9', imageSize: '1K' as const };
 
     // 7. the money law, ONE copy (billed.ts): price → ensureBudget → submit →
