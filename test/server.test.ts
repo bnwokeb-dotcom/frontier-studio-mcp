@@ -67,6 +67,8 @@ describe('MCP registry tools', () => {
       'commercial_ad_architect',
       'director_breakdown',
       'lumina_canvas_director',
+      'mythic_story_architect',
+      'script_doctor_packager',
       'skit_director_architect',
       'soundstage_master',
       'viral_clip_architect',

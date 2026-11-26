@@ -289,4 +289,62 @@ PIPELINE:
       };
     },
   );
+
+  // 8. Dark Mythological Procedural Thriller Story Architect
+  server.prompt(
+    'mythic_story_architect',
+    'Architects viral Dark Mythological Procedural Thrillers using enforceable Treaty World OS, 3-layer Reddington objectives, But/Therefore causality, zero-black cold opens, and strict 2-body / 1-verb Shot Tables.',
+    {
+      premise: z.string().describe('Core creature/judicial conflict or forbidden treaty premise'),
+      runtime_minutes: z.string().optional().describe('Target film duration (e.g., 10 or 18)'),
+    },
+    async (args) => {
+      return {
+        description: 'Dark Mythological Procedural Story & Cold Open Protocol',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are the Dark Mythological Story Architect developing Premise: "${args.premise}" (Target runtime: ${args.runtime_minutes ?? '12'}m).
+
+IRON LAWS:
+1. Build the 8-Vector Treaty World Operating System (Institution, Treaty, Enforcement, Biology, Resource, Jurisdiction, Leverage, Irreversible Price) + 3-Layer Reddington Objective Stack BEFORE drafting dialogue.
+2. Enforce BUT/THEREFORE causality across every beat; start Frame 0:00 directly on an impossible procedural action in crisp 5600K daylight/skylight (ZERO black-screen opens, ZERO cryptic 2-word titles, ZERO background crowds — strict 2-body cap).
+3. Lock each scene's Scene Turn Grid + explicit Prop Math Ledger (In -> Used -> Out), restrict lines to <= 18 words with weaponized [breath]/[pause] subtext, and cap each 3-5s cut to 1 physical action verb.
+4. Persist state via \`film_create\`, \`sequence_state_plan\`, \`director_desk_stage\`, and verify via \`shot_table_validate\` before rendering.`,
+            },
+          },
+        ],
+      };
+    },
+  );
+
+  // 9. Dark Mythological Script Doctor, Optical DP & YouTube Packager
+  server.prompt(
+    'script_doctor_packager',
+    'Audits Dark Mythological scripts/prompts against anti-slop optical rules, enforces 50%+ figure-ground 16:9 mobile thumbnails, front-loaded Human+Contradiction titles (<=60 chars), -14 LUFS/-1 dBTP post specs, and 9:16 feeder Shorts.',
+    {
+      script_or_film_id: z.string().describe('Film ID or draft screenplay excerpt to audit and package'),
+    },
+    async (args) => {
+      return {
+        description: 'Anti-Slop Audit, YouTube 16:9 Packaging & Feeder Shorts Protocol',
+        messages: [
+          {
+            role: 'user',
+            content: {
+              type: 'text',
+              text: `You are the Dark Mythological Script Doctor, Optical DoP, and Packaging Director auditing: "${args.script_or_film_id}".
+
+AUDIT & PACKAGING PIPELINE:
+1. SCRIPT & OPTICAL PURGE: Verify zero black-screen opens, zero warm lantern mud/soup fog, zero 65mm/8K/Unreal Engine prompt salad, strictly 1-2 actors (no crowd limb blobs), wet reflective creature corneas (no glowing LED eyes), and <= 1 action verb per 3-5s real-time combat cut.
+2. VALIDATE & STAGE: Run \`shot_table_validate\` and \`director_desk_stage\` / \`sequence_state_plan\` checks; enforce \`acoustic_match\` convolution, \`-14 LUFS\` / \`-1.0 dBTP\` mastering ceiling, and \`qc_vision_audit\`.
+3. PACKAGING: Deliver 3 YouTube titles executing Human + Extraordinary Encounter + Impossible Outcome (contradiction front-loaded <= 60 chars; zero 2-word cryptic titles) + 1 dedicated 16:9 mobile-safe (150px squint) thumbnail plate with >=50% luminance delta and bottom-right safe zone, then slice 3 hook-first 9:16 Shorts via \`clip_plan_viral\` + \`clip_render_viral\`.`,
+            },
+          },
+        ],
+      };
+    },
+  );
 }

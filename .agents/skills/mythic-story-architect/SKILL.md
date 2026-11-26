@@ -1,0 +1,43 @@
+---
+name: mythic-story-architect
+description: Use when conceiving, breaking, or outlining a Dark Mythological thriller film, cold open, or episodic arc before any scene or shot is scripted.
+---
+
+# Mythic Story Architect
+
+## Overview
+Build **"The Forbidden World"** narratives: a human operating inside a dangerous nonhuman civilization governed by ancient institutional treaties, biological rules, and ruthless leverage. The creature wins the click; enforceable civilization rules win 15+ minute watch time.
+
+## Iron Laws — No Exceptions
+1. **ZERO Fairytale / Thin Monster Tropes:** Never pitch cute creature pets, angry torch-wielding villagers, or random spectacle jumps. Every nonhuman faction MUST hold codified institutions, territory, and rational leverage.
+2. **ZERO Black-Screen Openings or 0:25 Title Slams:** Cold opens (`0:00–0:30`) NEVER start on extended black frames or interrupt the cliffhanger at `0:25` with a title card.
+3. **`But / Therefore` Causality Only:** Never link beats with *"and then"*. Scene N forces Scene N+1 via irreversible consequence (`THEREFORE`) or systemic reversal (`BUT`).
+4. **Prop & Cast Math Ledger Required:** Track exact headcount and key object counts per scene (`3 launched - 2 destroyed = 1 returning`). Max 2 fighters per close action beat — **NO "dozens of pale hands" AI-breaking crowds**.
+
+```dot
+digraph greenlight_gate {
+    rankdir=LR;
+    "Premise Idea" -> "Enforceable Treaty + Bio Rule?" [shape=diamond];
+    "Enforceable Treaty + Bio Rule?" -> "Reject / Redesign" [label="no"];
+    "Enforceable Treaty + Bio Rule?" -> "3-Layer Reddington Leverage?" [shape=diamond];
+    "3-Layer Reddington Leverage?" -> "Reject / Redesign" [label="no"];
+    "3-Layer Reddington Leverage?" -> "Title + 0:00-0:30 Hook Ready?" [shape=diamond];
+    "Title + 0:00-0:30 Hook Ready?" -> "Write Script (subtext-screenplay-writer)" [label="yes"];
+}
+```
+
+## Mandatory Deliverables Before Scripting
+1. **Treaty World Operating System (`Institution · Treaty · Enforcement · Biology · Jurisdiction · Leverage · Irreversible Price`)** — see [treaty-os-and-pressure-map.md](references/treaty-os-and-pressure-map.md).
+2. **3-Layer Objective Stack:** `Apparent Objective` | `Actual Objective` | `Hidden Objective`.
+3. **5-Beat Cold Open (`0:00–0:30`):** Impossible procedural act (`0–3s`) -> operational tools (`3–8s`) -> expectation violation (`8–14s`) -> 1–2 weaponized lines (`14–21s`) -> irreversible institutional shift (`21–30s`).
+4. **18-Min Narrative Pressure Map + Continuity Math Table**, registered via `film_create` and `sequence_state_plan`.
+
+## Red Flags — Stop & Re-Break If You Think This
+| Rationalization | Reality & Fix |
+| --- | --- |
+| *"Budget is tight; skip treaty depth and summarize in narration."* | Summarized lore kills YouTube retention. Replace dialogue lectures with one physical boundary rule violated on camera. |
+| *"A moody 5s black screen builds atmosphere before the scene."* | Viewers swipe off black screens in 2s. Open on frame 0:00 with physical procedural action. |
+| *"Dramatic monster hands/crowd swarming adds cheap scale."* | Multi-limb crowds hallucinate and morph in AI video. Cap foreground bodies at `1–2` and imply scale via architecture and sound. |
+| *"Let's pick an artistic 2-word title like 'THE ASH CLAUSE'."* | Cryptic 2-word titles fail cold browse CTR. Hand title & thumbnail to `youtube-thumbnail-packaging-director`. |
+
+**NEXT REQUIRED SKILL:** `subtext-screenplay-writer` once outline and Continuity Math Ledger are locked.
