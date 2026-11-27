@@ -6,13 +6,13 @@ description: Use when conceiving, breaking, or outlining a Dark Mythological thr
 # Mythic Story Architect
 
 ## Overview
-Build **"The Forbidden World"** narratives: a human operating inside a dangerous nonhuman civilization governed by ancient institutional treaties, biological rules, and ruthless leverage. The creature wins the click; enforceable civilization rules win 15+ minute watch time.
+Build **Primal Dark Mythological Cinema**: universal, heart-wrenching human bonds (betrayed king, condemned mother, forsaken soldier, thrown sacrifice) collided with ancient, hyper-rational nonhuman realms. **Primal emotion + terrifying creature devotion wins 20M–100M clicks; invisible world rules & shocking betrayals win 15+ minute watch time.**
 
 ## Iron Laws — No Exceptions
-1. **ZERO Fairytale / Thin Monster Tropes:** Never pitch cute creature pets, angry torch-wielding villagers, or random spectacle jumps. Every nonhuman faction MUST hold codified institutions, territory, and rational leverage.
-2. **ZERO Black-Screen Openings or 0:25 Title Slams:** Cold opens (`0:00–0:30`) NEVER start on extended black frames or interrupt the cliffhanger at `0:25` with a title card.
-3. **`But / Therefore` Causality Only:** Never link beats with *"and then"*. Scene N forces Scene N+1 via irreversible consequence (`THEREFORE`) or systemic reversal (`BUT`).
-4. **Prop & Cast Math Ledger Required:** Track exact headcount and key object counts per scene (`3 launched - 2 destroyed = 1 returning`). Max 2 fighters per close action beat — **NO "dozens of pale hands" AI-breaking crowds**.
+1. **Primal Myth First, Rules Invisible (NO Dry Legal/Sci-Fi Puzzles):** NEVER write courtroom clerk tricks, tax/quarantine loopholes, or medical/engineering gadget plots (`hydrophones`, `serum tubes`, `disinheritance writs`). Ground every premise in timeless primal bloodlines & archetypes: **Crown, Child, Mother, Brother, Bride, Prisoner, Beast, Dragon, Oath, Vengeance.** World rules govern consequences *underneath*, never as dry dialogue lectures.
+2. **ZERO Fairytale Slop or Black-Screen Openings (`0:00–0:25`):** Never pitch cute pet dragons, random jump-scares, extended black frames, or `0:25` title interruptions. Open frame `0:00` on an unmistakable physical act of mercy, betrayal, or dread.
+3. **`But / Therefore` Causality Only:** Never link beats with *"and then"*. Every turn wounds deeper: tenderness between human & monster contrasted against ruthless betrayal by human kin.
+4. **Prop & Cast Math Ledger Required:** Track exact headcount and key object counts per scene (`3 launched - 2 destroyed = 1 returning`). Max `1–2` hero subjects per close action beat — **NO "dozens of pale hands" AI-breaking crowds**.
 
 ```dot
 digraph greenlight_gate {
@@ -40,5 +40,6 @@ digraph greenlight_gate {
 | *"A moody 5s black screen builds atmosphere before the scene."* | Viewers swipe off black screens in 2s. Open on frame 0:00 with physical procedural action. |
 | *"Dramatic monster hands/crowd swarming adds cheap scale."* | Multi-limb crowds hallucinate and morph in AI video. Cap foreground bodies at `1–2` and imply scale via architecture and sound. |
 | *"Let's pick an artistic 2-word title like 'THE ASH CLAUSE'."* | Cryptic 2-word titles fail cold browse CTR. Hand title & thumbnail to `youtube-thumbnail-packaging-director`. |
+| *"This clever sci-fi/legal loophole makes the human smart."* | Audiences don't crave legal trivia or gadget names — they click raw emotion (`Mother / King / Child / Beast / Betrayal`). Hide the mechanics underneath visceral drama. |
 
 **NEXT REQUIRED SKILL:** `subtext-screenplay-writer` once outline and Continuity Math Ledger are locked.
