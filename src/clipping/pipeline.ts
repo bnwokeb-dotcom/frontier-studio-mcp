@@ -322,7 +322,13 @@ export function generateClipProductionPlan(
  */
 export async function executeClipRender(
   plan: ClipProductionPlan,
-  opts: { subtitleAssPath?: string; burnCaptions?: boolean; sfxSpots?: SfxSpot[]; studioRoot?: string } = {},
+  opts: {
+    subtitleAssPath?: string;
+    burnCaptions?: boolean;
+    sfxSpots?: SfxSpot[];
+    studioRoot?: string;
+    activeContentAspect?: number;
+  } = {},
 ): Promise<ClipRenderResult & { burnedCaptions: boolean; sfxSpotsMixed: number }> {
   if (!Number.isFinite(plan.trim.start_s) || !Number.isFinite(plan.trim.end_s) || plan.trim.start_s < 0 || plan.trim.end_s <= plan.trim.start_s) {
     throw errValidation(
@@ -379,13 +385,21 @@ export async function executeClipRender(
     crop_width: Math.round(srcProbe.height * (9 / 16)),
     crop_height: srcProbe.height,
   };
-  const cropW = Math.max(2, Math.min(kf0.crop_width, srcProbe.width));
-  const cropH = Math.max(2, Math.min(kf0.crop_height || srcProbe.height, srcProbe.height));
+  let cropW = Math.max(2, Math.min(kf0.crop_width, srcProbe.width));
+  let cropH = Math.max(2, Math.min(kf0.crop_height || srcProbe.height, srcProbe.height));
+  let cropY = 0;
+
+  if (opts.activeContentAspect && opts.activeContentAspect > srcProbe.width / srcProbe.height) {
+    const activeH = Math.max(2, Math.floor((srcProbe.width / opts.activeContentAspect) / 2) * 2);
+    cropH = activeH;
+    cropW = Math.max(2, Math.min(Math.floor((activeH * (9 / 16)) / 2) * 2, srcProbe.width));
+    cropY = Math.max(0, Math.floor((srcProbe.height - activeH) / 2));
+  }
 
   const offsetS = resolveClipOffsetS(plan.reframe_track, plan.trim.start_s);
   const cropExpr = buildDynamicCropXExpr(plan.reframe_track, srcProbe.width, offsetS, cropW);
 
-  const videoChain = `[0:v]crop=w=${cropW}:h=${cropH}:x='${cropExpr}':y=0,scale=1080:1920:flags=lanczos,setsar=1${assFilter}[scaled]`;
+  const videoChain = `[0:v]crop=w=${cropW}:h=${cropH}:x='${cropExpr}':y=${cropY},scale=1080:1920:flags=lanczos,setsar=1${assFilter}[scaled]`;
   const filterComplex = srcProbe.hasAudio
     ? `${videoChain};[0:a]loudnorm=I=${plan.audio_processing.normalize_lufs}:LRA=7:tp=-1[outa]`
     : videoChain;
@@ -636,6 +650,25 @@ function hexToAssBgr(hex: string): string {
   return `&H00${b}${g}${r}`.toUpperCase();
 }
 
+function wrapHookBanner(raw: string, maxCharsPerLine = 22): string {
+  const words = raw.trim().toUpperCase().split(/\s+/).filter(Boolean);
+  if (words.length <= 1) return words.join('');
+  const lines: string[] = [];
+  let cur = '';
+  for (const w of words) {
+    if (!cur) {
+      cur = w;
+    } else if (cur.length + 1 + w.length <= maxCharsPerLine) {
+      cur += ` ${w}`;
+    } else {
+      lines.push(cur);
+      cur = w;
+    }
+  }
+  if (cur) lines.push(cur);
+  return lines.join('\\N');
+}
+
 /**
  * Generates an ASS v4+ script for 1080x1920 vertical Shorts/Reels/TikTok with
  * safe-zone caption margins, 3-word punch phrasing, bouncy spring pop, and top hook card.
@@ -659,13 +692,13 @@ export function generateKineticAssSubtitles(
     'ScriptType: v4.00+',
     'PlayResX: 1080',
     'PlayResY: 1920',
-    'WrapStyle: 2',
+    'WrapStyle: 1',
     'ScaledBorderAndShadow: yes',
     '',
     '[V4+ Styles]',
     'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
-    `Style: Kinetic,Arial,74,&H00FFFFFF,${highlightAss},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,60,60,360,1`,
-    'Style: HookCard,Arial,62,&H00000000,&H00000000,&H0000DEFF,&H0000DEFF,-1,0,0,0,100,100,0,0,3,18,0,8,80,80,190,1',
+    `Style: Kinetic,Arial,72,&H00FFFFFF,${highlightAss},&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,6,3,2,72,72,360,1`,
+    'Style: HookCard,Arial,46,&H00000000,&H00000000,&H0000DEFF,&H0000DEFF,-1,0,0,0,100,100,0,0,3,16,0,8,72,72,180,1',
     '',
     '[Events]',
     'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
@@ -673,7 +706,7 @@ export function generateKineticAssSubtitles(
 
   if (opts.titleHook?.trim()) {
     lines.push(
-      `Dialogue: 1,0:00:00.00,0:00:02.60,HookCard,,0,0,0,,{\\fad(120,180)}${opts.titleHook.trim().toUpperCase()}`,
+      `Dialogue: 1,0:00:00.00,0:00:02.60,HookCard,,0,0,0,,{\\fad(120,180)}${wrapHookBanner(opts.titleHook)}`,
     );
   }
 

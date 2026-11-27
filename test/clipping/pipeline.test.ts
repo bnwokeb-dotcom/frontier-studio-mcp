@@ -439,4 +439,62 @@ Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,DYNAMIC CROP TEST
     expect(rendered.burnedCaptions).toBe(true);
     expect(rendered.sfxSpotsMixed).toBe(sfxSpots.length);
   }, 30_000);
+
+  it('wraps long HookCard titles cleanly and strips 2.39:1 letterbox bars during 9:16 render', async () => {
+    const assText = generateKineticAssSubtitles([], {
+      titleHook: 'SHE HID A BABY DRAGON IN THE FLOOR',
+    });
+    expect(assText).toContain('WrapStyle: 1');
+    expect(assText).toContain('HookCard,Arial,46');
+    expect(assText).toContain('SHE HID A BABY DRAGON\\NIN THE FLOOR');
+
+    // Synthesize a 1344x768 source with bright gray active 2.39:1 band (1344x562) padded inside black bars
+    const srcLetterboxed = join(root, 'source_239_letterbox.mp4');
+    await execFile('ffmpeg', [
+      '-y',
+      '-f', 'lavfi', '-i', 'color=c=#C8C8C8:s=1344x562:r=24:d=2',
+      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2',
+      '-vf', 'pad=1344:768:0:103:black',
+      '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac',
+      srcLetterboxed,
+    ]);
+
+    const candidate: HighlightCandidate = {
+      clip_id: 'letterbox_crop_test',
+      start_s: 0,
+      end_s: 1.5,
+      duration_s: 1.5,
+      viral_score: 90,
+      title_hook: 'SHE HID A BABY DRAGON IN THE FLOOR',
+      reason: 'borderless vertical crop',
+      speech_density: 0.7,
+      audio_energy_db: -12,
+      words: [],
+    };
+    const reframe = calculateDynamicReframeTrack([], 1344, 768);
+    const plan = generateClipProductionPlan(
+      candidate,
+      { source_id: 's_lb', local_path: srcLetterboxed, duration_s: 2, width: 1344, height: 768, fps: 24 },
+      reframe,
+      join(root, 'out_borderless'),
+    );
+
+    const rendered = await executeClipRender(plan, {
+      studioRoot: root,
+      activeContentAspect: 2.39,
+    });
+    expect(rendered.width).toBe(1080);
+    expect(rendered.height).toBe(1920);
+
+    // Measure top 100px strip luminance: with 2.39:1 bars stripped, top strip must match bright gray (~180+ Y), not black (~16 Y)
+    const { stderr } = await execFile('ffmpeg', [
+      '-i', plan.export_spec.output_path,
+      '-vf', 'crop=1080:100:0:0,signalstats,metadata=print',
+      '-vframes', '1',
+      '-f', 'null', '-',
+    ]);
+    const yavgMatch = /lavfi\.signalstats\.YAVG=([0-9.]+)/.exec(stderr);
+    expect(yavgMatch).not.toBeNull();
+    expect(Number(yavgMatch![1])).toBeGreaterThan(150);
+  }, 30_000);
 });

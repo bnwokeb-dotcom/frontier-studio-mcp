@@ -129,6 +129,7 @@ export function registerClippingTools(server: McpServer, studioRoot: string): vo
         .default([]),
       burn_captions: z.boolean().default(true),
       auto_sfx: z.boolean().default(true),
+      active_content_aspect: z.number().positive().optional().describe('Optional inner frame ratio (e.g. 2.39) to trim letterbox bars before vertical crop'),
       output_dir: z.string().optional(),
     },
     async (a) =>
@@ -167,6 +168,7 @@ export function registerClippingTools(server: McpServer, studioRoot: string): vo
           burnCaptions: a.burn_captions,
           sfxSpots,
           studioRoot,
+          ...(a.active_content_aspect !== undefined ? { activeContentAspect: a.active_content_aspect } : {}),
         });
 
         return out({

@@ -115,18 +115,20 @@ function resolveShotRenderDir(
   return paths.rendersDir(filmId);
 }
 
-async function findRenderInJobDir(jobDir: string): Promise<string | undefined> {
+async function findRenderInJobDir(jobDir: string, preferUngraded = false): Promise<string | undefined> {
   const synced = join(jobDir, 'shot_synced.mp4');
   if (await isNonEmptyFile(synced)) return synced;
 
-  try {
-    const entries = (await readdir(jobDir)).filter((f) => f.startsWith('shot_graded_') && f.endsWith('.mp4')).sort();
-    for (let i = entries.length - 1; i >= 0; i--) {
-      const graded = join(jobDir, entries[i]);
-      if (await isNonEmptyFile(graded)) return graded;
+  if (!preferUngraded) {
+    try {
+      const entries = (await readdir(jobDir)).filter((f) => f.startsWith('shot_graded_') && f.endsWith('.mp4')).sort();
+      for (let i = entries.length - 1; i >= 0; i--) {
+        const graded = join(jobDir, entries[i]);
+        if (await isNonEmptyFile(graded)) return graded;
+      }
+    } catch {
+      return undefined;
     }
-  } catch {
-    return undefined;
   }
 
   const base = join(jobDir, 'shot.mp4');
@@ -143,6 +145,7 @@ export async function resolveShotVideoPath(
   filmId: string,
   shot: ShotRecord,
   jobs?: VideoJobEntry[],
+  preferUngraded = false,
 ): Promise<string | undefined> {
   const takes = shot.takes ?? [];
   const kept = takes.find((t) => t.verdict === 'kept');
@@ -150,23 +153,25 @@ export async function resolveShotVideoPath(
   const candidateTake = kept ?? latestValid;
 
   if (candidateTake) {
-    const found = await findRenderInJobDir(join(paths.rendersDir(filmId), candidateTake.jobId));
+    const found = await findRenderInJobDir(join(paths.rendersDir(filmId), candidateTake.jobId), preferUngraded);
     if (found) return found;
   }
 
-  const jobList = jobs ?? (await readJobs(paths, filmId).catch(() => []));
-  const completedJob = [...jobList]
-    .reverse()
-    .find((j) => j.shot_id === shot.id && j.status === 'completed');
-
-  if (completedJob) {
-    const dirFound = await findRenderInJobDir(join(paths.rendersDir(filmId), completedJob.job_id));
-    if (dirFound) return dirFound;
-    if (completedJob.artifact_path && (await isNonEmptyFile(completedJob.artifact_path))) {
-      return completedJob.artifact_path;
+  const filmJobs = jobs ?? (await readJobs(paths, filmId).catch(() => []));
+  for (let i = filmJobs.length - 1; i >= 0; i--) {
+    const j = filmJobs[i];
+    if (j.shot_id === shot.id && j.status === 'completed') {
+      if (!preferUngraded) {
+        if (j.artifact_path && (await isNonEmptyFile(j.artifact_path))) {
+          const fromJobDir = await findRenderInJobDir(dirname(j.artifact_path), false);
+          return fromJobDir ?? j.artifact_path;
+        }
+      }
+      const fromId = await findRenderInJobDir(join(paths.rendersDir(filmId), j.job_id), preferUngraded);
+      if (fromId) return fromId;
+      if (j.artifact_path && (await isNonEmptyFile(j.artifact_path))) return j.artifact_path;
     }
   }
-
   return undefined;
 }
 
@@ -602,6 +607,8 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
     {
       film_id: z.string().optional(),
       sequence: z.string().optional(),
+      target_lufs: z.number().min(-30).max(-9).optional(),
+      prefer_ungraded: z.boolean().optional(),
       apply: z.boolean().optional(),
       allow_dry_run_manifest: z.boolean().optional(),
     },
@@ -627,7 +634,7 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         const missingOrInvalid: string[] = [];
 
         for (const shot of shots) {
-          const videoPath = await resolveShotVideoPath(paths, filmId, shot, jobs);
+          const videoPath = await resolveShotVideoPath(paths, filmId, shot, jobs, a.prefer_ungraded === true);
           if (!videoPath) {
             missingOrInvalid.push(`${shot.id} (missing rendered MP4)`);
             resolvedClips.push({ shot });
@@ -742,6 +749,7 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
         const anyClipHasAudio = resolvedClips.some((c) => c.probe!.hasAudio);
         const includeAudio = anyClipHasAudio || externalStems.length > 0;
 
+        const targetLufs = a.target_lufs ?? -14;
         if (includeAudio) {
           if (anyClipHasAudio) {
             const aLabels: string[] = [];
@@ -759,7 +767,7 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
           }
 
           if (externalStems.length === 0) {
-            filterParts.push('[abase]loudnorm=I=-23:TP=-1.0[aout]');
+            filterParts.push(`[abase]loudnorm=I=${targetLufs}:TP=-1.0[aout]`);
           } else {
             const stemLabels: string[] = [];
             for (let k = 0; k < externalStems.length; k++) {
@@ -770,7 +778,7 @@ export function registerEditorTools(server: McpServer, studioRoot: string): void
               stemLabels.push(`[st${k}]`);
             }
             filterParts.push(
-              `[abase]${stemLabels.join('')}amix=inputs=${1 + externalStems.length}:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-23:TP=-1.0[aout]`,
+              `[abase]${stemLabels.join('')}amix=inputs=${1 + externalStems.length}:duration=first:dropout_transition=0:normalize=0,loudnorm=I=${targetLufs}:TP=-1.0[aout]`,
             );
           }
         }
